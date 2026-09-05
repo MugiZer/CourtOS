@@ -1,0 +1,165 @@
+{
+  "courtId": "c1",
+  "matchId": "m1",
+  "unsyncedSequences": [7, 8, 9],
+  "events": [
+    {
+      "id": "evt-offline-007",
+      "courtId": "c1",
+      "matchId": "m1",
+      "sequence": 7,
+      "timestamp": 1725460100000,
+      "source": "VOICE",
+      "transcript": "forty fifteen",
+      "proposedIntent": { "type": "POINT_WON", "winner": "A" },
+      "previousState": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 2,
+        "receiverPoints": 1,
+        "games": [2, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "A",
+          "server": "p1",
+          "receivingTeam": "B",
+          "deuceReceiver": "p2",
+          "adReceiver": "p2",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      },
+      "decision": "ACCEPTED",
+      "resultingState": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 3,
+        "receiverPoints": 1,
+        "games": [2, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "A",
+          "server": "p1",
+          "receivingTeam": "B",
+          "deuceReceiver": "p2",
+          "adReceiver": "p2",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      }
+    },
+    {
+      "id": "evt-offline-008",
+      "courtId": "c1",
+      "matchId": "m1",
+      "sequence": 8,
+      "timestamp": 1725460160000,
+      "source": "TOUCH",
+      "proposedIntent": { "type": "POINT_WON", "winner": "B" },
+      "previousState": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 3,
+        "receiverPoints": 1,
+        "games": [2, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "A",
+          "server": "p1",
+          "receivingTeam": "B",
+          "deuceReceiver": "p2",
+          "adReceiver": "p2",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      },
+      "decision": "ACCEPTED",
+      "resultingState": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 3,
+        "receiverPoints": 2,
+        "games": [2, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "A",
+          "server": "p1",
+          "receivingTeam": "B",
+          "deuceReceiver": "p2",
+          "adReceiver": "p2",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      }
+    },
+    {
+      "id": "evt-offline-009",
+      "courtId": "c1",
+      "matchId": "m1",
+      "sequence": 9,
+      "timestamp": 1725460220000,
+      "source": "VOICE",
+      "transcript": "game",
+      "proposedIntent": { "type": "POINT_WON", "winner": "A" },
+      "previousState": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 3,
+        "receiverPoints": 2,
+        "games": [2, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "A",
+          "server": "p1",
+          "receivingTeam": "B",
+          "deuceReceiver": "p2",
+          "adReceiver": "p2",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      },
+      "decision": "ACCEPTED",
+      "resultingState": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 0,
+        "receiverPoints": 0,
+        "games": [3, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "B",
+          "server": "p2",
+          "receivingTeam": "A",
+          "deuceReceiver": "p1",
+          "adReceiver": "p1",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      }
+    }
+  ]
+}
