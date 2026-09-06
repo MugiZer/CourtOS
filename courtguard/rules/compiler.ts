@@ -83,8 +83,9 @@ export function compileRuleset(definition: RulesetDefinition): CompiledRuleset {
   }
 
   const dec = definition.decidingSet;
-  if (dec?.kind !== "NORMAL_SET" && dec?.kind !== "MATCH_TIEBREAK")
-    fail(`decidingSet.kind must be NORMAL_SET|MATCH_TIEBREAK, got ${dec?.kind}`);
+  const decKind = dec?.kind;
+  if (decKind !== "NORMAL_SET" && decKind !== "MATCH_TIEBREAK")
+    fail(`decidingSet.kind must be NORMAL_SET|MATCH_TIEBREAK, got ${decKind}`);
   if (dec.kind === "MATCH_TIEBREAK") {
     assertPosInt(dec.pointsToWin, "decidingSet.pointsToWin");
     assertPosInt(dec.winByPoints, "decidingSet.winByPoints");

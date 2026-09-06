@@ -6,8 +6,11 @@
 // teams from the team containing the server); without a tiebreakPointNumber
 // the engine treats the state as a frozen seed, so counters map via the
 // serving team and each call is self-consistent.
-import { compileRuleset, createStore, definitionFromToggles, expectedReceiver, publish, transition } from './courtguard-live.js';
-import type { DemoToggles, RulesetStore } from './courtguard-live.js';
+import { transition } from '../../courtguard/guard.ts';
+import { compileRuleset } from '../../courtguard/rules/compiler.ts';
+import { createStore, definitionFromToggles, publish } from '../../courtguard/rules/push.ts';
+import type { DemoToggles, RulesetStore } from '../../courtguard/rules/push.ts';
+import { expectedReceiver } from '../../courtguard/rotation.ts';
 import type {
   CompiledRuleset,
   EventSource,

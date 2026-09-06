@@ -19,7 +19,7 @@ import {
   toDisplay,
   toMatchState,
 } from './guard-adapter';
-import { createStore, definitionFromToggles, startMatch } from './courtguard-live.js';
+import { createStore, definitionFromToggles, startMatch } from '../../courtguard/rules/push.ts';
 
 test('toDefinition maps demo rules onto the declarative model', () => {
   const d = toDefinition({ version: 3, noAd: true, deciding: 'tiebreak', changeover: 60 }, ['a', 'b', 'c', 'd']);
