@@ -1,27 +1,12 @@
-import type { Plan } from './types';
+import { optimize } from "./optimizer";
+import type { Plan } from "./types";
 
-// Explicit, tiny fixture comparison; not a replacement for the global optimizer.
-// Both rows evaluate the best continuation conditional on the first choice.
+// Historical demo inputs exercise the same scheduler used by the live preview.
 export function compareSchedules(consolationDuration = 10, semifinalDuration = 20, court2Remaining = 5, rest = 10, finalDuration = 20): Plan[] {
-  const semiCourt: 1 | 2 = consolationDuration < court2Remaining ? 1 : 2;
-  const semiStart = Math.min(consolationDuration, court2Remaining);
-  const semiEnd = semiStart + semifinalDuration;
-  const finalStartA = Math.max(semiEnd, court2Remaining) + rest;
-  const consolationCourt: 1 | 2 = semifinalDuration < court2Remaining ? 1 : 2;
-  const consolationStart = Math.min(semifinalDuration, court2Remaining);
-  const finalStartB = Math.max(semifinalDuration, court2Remaining) + rest;
-  return [
-    { first: 'consolation', finish: Math.max(finalStartA + finalDuration, consolationDuration), items: [
-      { match: 'M104', label: 'Consolation', court: 1, start: 0, end: consolationDuration, projected: true },
-      { match: 'M102', label: 'Semifinal B', court: 2, start: 0, end: court2Remaining, projected: true },
-      { match: 'M103', label: 'Semifinal A', court: semiCourt, start: semiStart, end: semiEnd, projected: true },
-      { match: 'M105', label: 'Final', court: semiCourt, start: finalStartA, end: finalStartA + finalDuration, projected: true },
-    ]},
-    { first: 'semifinal', finish: Math.max(finalStartB + finalDuration, consolationStart + consolationDuration), items: [
-      { match: 'M103', label: 'Semifinal A', court: 1, start: 0, end: semifinalDuration, projected: false },
-      { match: 'M102', label: 'Semifinal B', court: 2, start: 0, end: court2Remaining, projected: true },
-      { match: 'M104', label: 'Consolation', court: consolationCourt, start: consolationStart, end: consolationStart + consolationDuration, projected: true },
-      { match: 'M105', label: 'Final', court: 1, start: finalStartB, end: finalStartB + finalDuration, projected: true },
-    ]},
-  ];
+  const plans = optimize([
+    { id: "M103", label: "Semifinal A", players: ["A", "B"], duration: semifinalDuration, rest: 0, dependencies: [] },
+    { id: "M104", label: "Consolation", players: ["C", "D"], duration: consolationDuration, rest: 0, dependencies: [] },
+    { id: "M105", label: "Final", players: ["A", "B", "E", "F"], duration: finalDuration, rest, dependencies: ["M103", "M102"] },
+  ], [{ match: "M102", label: "Semifinal B", court: 2, end: court2Remaining, players: ["E", "F"] }]);
+  return [plans.find(p => p.firstMatch === "M104")!, plans.find(p => p.firstMatch === "M103")!];
 }

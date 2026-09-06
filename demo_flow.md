@@ -1,5 +1,24 @@
 # CourtOS — Live Demo Flow
 
+## Current running sequence — September 6, 2026
+
+This revision supersedes the older Court 2 pacing, sponsor-at-opening sequence, and 55-versus-50 optimization example below. The detailed Court 1 correction, rejection, offline, and deciding-point interactions remain.
+
+1. Open with Court 1 at 0–0 and Court 2 at 40–30. Court 2 has an accepted opening snapshot in history and no new-point notification.
+2. Accept the first Court 1 point. Court 2 immediately reaches 40–40 and raises its dispute notification once. Restore its 40–30 snapshot through the organizer history. Court 1 keeps its independent game.
+3. Complete the existing Court 1 game. The scheduler compares the best legal continuation for each first choice using configured estimates: singles 120 minutes, Express semifinal 40 minutes, Express final 30 minutes, and about 45 minutes remaining on Court 2.
+4. Assign singles to Court 1. Show two players entering and waiting; do not begin or autoplay the singles match. Keep the saved comparison visible. Sponsor changeover remains an optional separate scenario.
+
+| Choice | Court 1 | Court 2 | Projected finish |
+|---|---|---|---|
+| Singles first — selected | Singles 0–120 | Current semifinal 0–45; Express semifinal 45–85; Express final 85–115 | 120 min |
+| Semifinal first — best continuation | Express semifinal 0–40; singles 40–160 | Current semifinal 0–45; Express final 45–75 | 160 min |
+
+**40 projected minutes saved, 25% earlier.** Both alternatives use identical inputs and obey dependencies and player/court availability. Express rounds have no scheduled rest. These are scenario estimates, not measured savings. The primary display derives the difference from solver output and retains the original assignment timestamp.
+
+Storage v2 opens this revised sequence for fresh sessions; reload preserves progress. Use Scenarios → Start live scoring to restart. Earlier detailed sections below are historical where they conflict with this revision.
+
+
 Status: agreed narrative for the frontend design pass, updated September 5, 2026.
 
 This document records the approved one-game demo with deterministic 3D rally choreography and the organizer dispute moved to Court 2. It is a demo specification, not evidence that the capabilities have been implemented or tested. No UI styling or frontend images are specified here.

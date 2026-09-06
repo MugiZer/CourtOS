@@ -1549,3 +1549,31 @@ When one of these is chosen, append a new ADR here.
 ## 27. One-sentence architecture summary
 
 > **CourtOS uses probabilistic intelligence to understand humans and deterministic systems to run tennis: CourtGuard owns legal match state, event history makes it replayable and offline-safe, the Tournament Twin centralizes reality, and CourtOptimizer globally re-plans the event whenever reality changes.**
+
+---
+
+## 28. Amateur formats and Express implementation — September 6, 2026
+
+This updates the preview implementation and supersedes the three-control limitation in section 15 for upcoming match configuration. Production server integration remains pending.
+
+- `Match.format` is Singles, Doubles, or Mixed doubles. Rosters require two or four distinct players. One scorer advances the validated alternating service order, including tiebreak service and the following set. Score snapshots retain rotation for corrections. Doubles roster positions define deuce/ad receivers; the organizer selects the first server before assignment.
+- Each upcoming match owns a versioned rule snapshot: scoring, deciding-set policy, pace, changeover seconds, between-set seconds, recovery minutes before this match, and estimated court occupancy in minutes. Assigned matches retain their snapshot. Bracket-linked semifinals must agree on format; final participants resolve from recorded winners.
+- Standard and Fast-Play / Express are presets, not separate engines. Express defaults to No-Ad, a 10-point deciding tiebreak, and zero rest at all three boundaries. Scoring remains explicitly editable. Zero rest bypasses the rest phase, sponsor countdown, and automatic Time alert. Standard set breaks and changeovers are independent; the first game of a set does not trigger a rest.
+- Changing format or pace loads an editable demo duration: Standard singles 10 minutes, Standard doubles/mixed 20, Express singles 8, Express doubles/mixed 15. These are fixture assumptions, not measured predictions or time limits. The scorer still uses six-game sets and best of three. Remaining-time projections scale from live score progress and never finish before an active rest timer expires.
+- `src/demo/optimizer.ts` enumerates the small upcoming fixture horizon across available courts. It enforces court/player non-overlap, prerequisites, and per-match recovery. Unknown winners reserve all possible participants for conservative projections. It retains the best completion time for each actual first match. The historical `compareSchedules` fixture now exercises this same implementation.
+- Assignments are revalidated against the current revision, court availability, known participants, and current recovery before being appended. The chosen plan drives assignment; M103 is no longer unconditional. Completed match snapshots and completion timestamps supply future winners and recovery. The preview retries when a court is free; score-driven projections are recalculated from the current state.
+- Upcoming Matches and the settings drawer show participants, format, pace, duration, separate rests, version, readiness, and projected assignments. The singles visualization uses two players. Existing browser-local snapshots receive default fields without discarding their court scores.
+
+Scope limits: this is a bounded browser-local scheduler, not the production global solver or networked Tournament Twin. The local fixture identifies players by unique, consistently spelled names; production registration should supply stable PlayerIds. Mixed doubles uses the same service rotation as doubles; eligibility and gender-specific receiver policies are not modeled. Receiving positions stay fixed in this preview. Duration uncertainty, waiting-time/churn objective weights, and larger-horizon solver scaling remain production work.
+
+## 29. Featured scheduling and early-dispute scenario — September 6, 2026
+
+The latest scenario supersedes the earlier 55-versus-50 fixture and late Court 2 dispute as the primary presentation. The older numbers remain regression inputs to the same scheduler.
+
+- Court 1 starts its final game at 0–0. Court 2 starts at 40–30, at 4–4 in its second set, with a 90-minute full-match estimate (45 minutes remaining under the current progress model).
+- A seeded `snapshot` event records Court 2's accepted opening score without triggering an unread-point alert. The first accepted M101 point causes exactly one legal Court 2 point to 40–40 and a separate dispute event. Rejected calls, animation ticks, and repeated ticks do not advance it again. History may restore the opening snapshot, preserving the dispute and correction history.
+- At M101 completion, the ready singles consolation has a 120-minute estimate; Semifinal A is Express at 40 minutes and the final is Express at 30 minutes. Both Express rounds have zero scheduled recovery. Singles-first finishes at 120 minutes, while the best semifinal-first continuation finishes at 160 minutes. The 40-minute / 25% improvement is calculated from the alternatives, never fixed UI text. It remains stable across the immediate post-dispute score progression.
+- Assignment still follows the best feasible plan. Equal-finish plans prefer the longer first match. Court 1 receives singles; the mixed-doubles bracket continues on Court 2 as prerequisites resolve.
+- `optimizationDecision` persists the compared plans, timestamp, assigned match, and court. The saved decision is displayed separately from the live queue so later re-solving cannot erase the evidence or relabel a historical estimate as a current forecast.
+- Warmup only brings players onto court; rallies require actual playing state and a started rally. Singles uses two visible roster slots and singles-width shot destinations. Doubles and mixed doubles use four slots and the scorer's service/receiver order; character appearance is generic.
+- The scenario uses browser storage v2 for a fresh opening on deployment. Existing v2 progress survives reload. Earlier storage is left intact, and resetting the scenario clears its saved optimization comparison.

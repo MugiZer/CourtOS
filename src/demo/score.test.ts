@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialMatch } from './fixtures';
-import { labels, nextScore, normalizeCall, resolveCall } from './score';
+import { freshScore, labels, nextScore, normalizeCall, resolveCall } from './score';
 import { compareSchedules } from './schedule';
 import type { Match, Team } from './types';
 
 function point(match: Match, winner: Team) { const score = nextScore(match, winner); assert.ok(score); match.score = score; if (score.winner !== null) match.phase = 'complete'; }
+function finalGame() { const match = initialMatch(2); match.score = { ...freshScore(), games: [5, 4], sets: [[6, 4], [4, 6]] }; return match; }
 
 test('approved game finishes 6-4, 4-6, 6-4 only after the deciding point is accepted', () => {
   const match = initialMatch(1);
@@ -31,7 +32,7 @@ test('Thirty-love is legal at 15-love, but blocked at 15-all without mutation', 
 });
 
 test('advantage doubles at deuce needs a two-point margin', () => {
-  const match = initialMatch(2);
+  const match = finalGame();
   for (let i = 0; i < 3; i++) { point(match, 0); point(match, 1); }
   point(match, 0); assert.deepEqual(labels(match.score), ['AD', '40']);
   point(match, 1); assert.deepEqual(labels(match.score), ['40', '40']);
@@ -52,7 +53,7 @@ test('a ten-point match tiebreak does not end 10-9', () => {
 });
 
 test('a seven-point tiebreak requires a two-point margin', () => {
-  const match = initialMatch(2); match.score.games = [6, 6]; match.score.tieBreak = true; match.score.points = [6, 6];
+  const match = finalGame(); match.score.games = [6, 6]; match.score.tieBreak = true; match.score.points = [6, 6];
   point(match, 0); assert.equal(match.score.winner, null);
   point(match, 0); assert.equal(match.score.winner, 0); assert.deepEqual(match.score.sets.at(-1), [7, 6]);
 });
@@ -61,6 +62,13 @@ test('calls normalize the narrow tennis vocabulary', () => {
   assert.equal(normalizeCall('Thirty-all.'), '30 30');
   assert.equal(normalizeCall('Fifteen love'), '15 0');
   assert.equal(normalizeCall('Deuce'), '40 40');
+  assert.equal(normalizeCall('4030'), '40 30');
+});
+
+test('a compact 4030 call resolves to the legal 40-30 transition', () => {
+  const match = initialMatch(1);
+  for (const winner of [0, 1, 0, 1] as const) point(match, winner);
+  assert.equal(resolveCall(match, '4030'), 0);
 });
 
 test('upcoming rules do not change a started match snapshot', () => {

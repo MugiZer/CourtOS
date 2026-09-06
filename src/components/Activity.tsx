@@ -2,7 +2,7 @@ import { ArrowCounterClockwise, ArrowRight, Check, ClockCounterClockwise, Flag, 
 import type { Court, CourtEvent } from '../demo/types';
 import { scoreText } from '../demo/score';
 
-const icons = { point: Check, correction: ArrowCounterClockwise, blocked: ShieldCheck, dispute: WarningCircle, resumed: Check, changeover: ClockCounterClockwise, assignment: Flag, connection: WifiSlash, rules: ShieldCheck };
+const icons = { snapshot: ClockCounterClockwise, point: Check, correction: ArrowCounterClockwise, blocked: ShieldCheck, dispute: WarningCircle, resumed: Check, changeover: ClockCounterClockwise, assignment: Flag, connection: WifiSlash, rules: ShieldCheck };
 export function Activity({ court, onAll }: { court: Court; onAll: () => void }) {
   const events = court.events.slice(-3).reverse();
   return <section className="activity-section"><div className="subsection-heading"><h2>Match activity <span>{court.events.length}</span></h2><button onClick={onAll}>View history <ArrowRight size={15}/></button></div>

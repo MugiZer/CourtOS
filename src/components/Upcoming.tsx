@@ -1,36 +1,89 @@
-import { Check, Clock, LockKey, SlidersHorizontal, TennisBall } from '@phosphor-icons/react';
-import { upcoming } from '../demo/fixtures';
-import type { DemoState, Plan } from '../demo/types';
+import { useState, type FormEvent } from 'react';
+import { Check, Clock, Plus, SlidersHorizontal, Trash, X } from '@phosphor-icons/react';
+import { addQueuedMatch, cancelQueuedMatch } from '../demo/store';
+import type { DemoState, MatchFormat, Plan, Rules } from '../demo/types';
+import { defaultDuration, paceRules } from '../demo/matchConfig';
+import { resolvedMatch, scheduleState } from '../demo/optimizer';
 
 export default function Upcoming({ state, onRules }: { state: DemoState; onRules: () => void }) {
-  const assigned = state.plan.status === 'assigned';
+  const plans = scheduleState(state);
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [draft, setDraft] = useState(() => newMatchDraft());
+  const pending = state.upcomingMatches.filter(match => !state.courts.some(c => c.match.id === match.id) && !state.completedMatches.some(result => result.match.id === match.id));
+  const updateFormat = (format: MatchFormat) => setDraft(current => ({ ...current, format, teams: [['', ''], ['', '']] }));
+  const submitNewMatch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    try {
+      const size = draft.format === 'Singles' ? 1 : 2;
+      const teams: [string[], string[]] = [draft.teams[0].slice(0, size), draft.teams[1].slice(0, size)];
+      const id = addQueuedMatch({ ...draft, teams });
+      setNotice(`${id} added. The optimizer is comparing the new queue.`);
+      setAdding(false);
+      setDraft(newMatchDraft());
+    } catch (error) { setNotice((error as Error).message); }
+  };
+  const cancel = (id: string) => { const result = cancelQueuedMatch(id); setNotice(result.message); };
   return <section className="upcoming-page">
-    <div className="section-heading"><div><span className="eyebrow">MATCH QUEUE</span><h1>Up next.</h1><p>Readiness, court assignments, and estimated start order.</p></div><button className="button" onClick={onRules}><SlidersHorizontal size={18}/> Upcoming configuration</button></div>
-    <div className="schedule-intro"><span><TennisBall size={19}/> {assigned ? 'Semifinal A is warming up on Court 1' : 'Two courts in play'}</span><span>Next available court receives the next valid match.</span></div>
-    <div className="upcoming-table">
-      <div className="upcoming-table-head"><span>MATCH</span><span>PLAYERS</span><span>FORMAT</span><span>READINESS</span><span>COURT</span></div>
-      {upcoming.map(m => <div className="upcoming-row" key={m.id}>
-        <div><span className="match-id">{m.id}</span><h3>{m.title}</h3><span className="estimate"><Clock size={13}/>{m.estimate} min estimated</span></div>
-        <div className="upcoming-players"><span>{m.teams[0]}</span><small>vs</small><span>{m.teams[1]}</span></div>
-        <div><span>{m.format}</span><small>{m.id === 'M104' ? 'Advantage · v1' : (state.upcomingRules.noAd ? 'No-Ad' : 'Advantage') + ' · v' + state.upcomingRules.version}</small></div>
-        <div className={'readiness ' + (m.id === 'M105' ? 'waiting' : '')}>{m.id === 'M105' ? <LockKey size={16}/> : <Check size={16}/>}<span>{assigned && m.id === 'M103' ? 'Assigned · warmup' : m.status}{m.id === 'M105' && <small>Both results + 10 min rest</small>}</span></div>
-        <div className="court-assignment">{assigned && m.id === 'M103' ? <><b>Court 1</b><span className="tiny-tag">COMMITTED</span></> : assigned && m.id === 'M104' ? <><b>Court 2</b><span className="tiny-tag outline">PLANNED</span></> : <span>Awaiting court</span>}</div>
-      </div>)}
-    </div>
-    <div className="dependency-strip"><span className="eyebrow">THE ROAD TO THE FINAL</span><div><span>Semifinal A winner</span><span className="plus-sign">+</span><span>Semifinal B winner</span><span>then</span><span>10-minute rest</span><span>then</span><strong>Final</strong></div></div>
-    {state.plan.options.length > 0 ? <ScheduleComparison state={state}/> : <div className="schedule-placeholder"><div className="schedule-placeholder-icon"><Clock size={32}/></div><div><h3>Waiting for an available court</h3><p>When Court 1 becomes free, compare the best continuation for each ready match. The selected assignment will appear here.</p></div><span className="small-label">REPLANNED ON COURT AVAILABILITY</span></div>}
+    <div className="section-heading"><div><span className="eyebrow">MATCH QUEUE</span><h1>Upcoming matches</h1><p>Match formats, rest requirements, and projected court assignments.</p></div><div className="queue-heading-actions"><button className="button" onClick={() => { setAdding(value => !value); setNotice(''); }}><Plus size={18}/>{adding ? 'Close add match' : 'Add match'}</button><button className="button" onClick={onRules}><SlidersHorizontal size={18}/> Configure matches</button></div></div>
+    <section className="queue-controls" aria-label="Queue controls"><div><span className="eyebrow">RECEDING HORIZON</span><strong>{plans.length ? `${plans.length} feasible configurations` : 'No feasible configuration'}</strong><p>Every queue, rules, and availability change is replanned from the current courts.</p></div><div className="queue-control-meta"><span className={'queue-status ' + state.plan.status}>{state.plan.status === 'solving' ? 'Re-solving' : 'Live projection'}</span><span>{pending.length} pending · {state.courts.length} courts</span></div></section>
+    {adding && <form className="add-match-form" onSubmit={submitNewMatch}><div className="add-match-header"><div><span className="eyebrow">ADD TO QUEUE</span><h2>New match</h2></div><button type="button" className="icon-button" aria-label="Close add match" onClick={() => setAdding(false)}><X size={19}/></button></div><div className="add-match-grid"><label className="field-group">Round label<input required maxLength={50} value={draft.round} onChange={e => setDraft({ ...draft, round: e.target.value })} placeholder="e.g. Court 3 feature"/></label><label className="field-group">Format<select value={draft.format} onChange={e => updateFormat(e.target.value as MatchFormat)}>{(['Singles', 'Doubles', 'Mixed doubles'] as const).map(format => <option key={format}>{format}</option>)}</select></label></div><div className="add-roster-grid">{draft.teams.map((team, teamIndex) => <fieldset className="field-group" key={teamIndex}><legend>Team {teamIndex + 1}</legend>{team.slice(0, draft.format === 'Singles' ? 1 : 2).map((player, playerIndex) => <input required key={playerIndex} value={player} placeholder={`Player ${teamIndex * 2 + playerIndex + 1}`} onChange={e => { const teams = structuredClone(draft.teams); teams[teamIndex][playerIndex] = e.target.value; setDraft({ ...draft, teams }); }}/>)}</fieldset>)}</div><div className="add-match-grid add-match-meta"><label className="field-group">Pace<select value={draft.pace} onChange={e => { const pace = e.target.value as Rules['pace']; setDraft({ ...draft, pace, matchRest: pace === 'Express' ? 0 : draft.matchRest }); }}>{(['Standard', 'Express'] as const).map(pace => <option key={pace}>{pace}</option>)}</select></label><label className="field-group">Estimated minutes<input required type="number" min="1" max="480" value={draft.estimatedMinutes} onChange={e => setDraft({ ...draft, estimatedMinutes: Number(e.target.value) })}/></label><label className="field-group">Recovery before match<input required type="number" min="0" max="120" disabled={draft.pace === 'Express'} value={draft.matchRest} onChange={e => setDraft({ ...draft, matchRest: Number(e.target.value) })}/></label></div><div className="add-match-actions"><button className="button primary" type="submit"><Check size={18}/> Add and replan</button><span>New matches start as warmup and stay unassigned until a court is free.</span></div></form>}
+    {notice && <p className="queue-notice" role="status">{notice}</p>}
+    <ScheduleComparison state={{ ...state, plan: { ...state.plan, options: plans } }} optionsOverride={plans}/>
+    <div className="upcoming-table"><div className="upcoming-table-head"><span>MATCH</span><span>PLAYERS</span><span>FORMAT & PACE</span><span>READINESS</span><span>COURT</span></div>
+      {state.upcomingMatches.map(original => {
+        const assigned = state.courts.find(c => c.match.id === original.id);
+        const completed = state.completedMatches.find(r => r.match.id === original.id);
+        const match = assigned?.match ?? completed?.match ?? original;
+        const resolved = resolvedMatch(state, match);
+        const projection = plans[0]?.items.find(i => i.match === match.id);
+        const participants = resolved?.teams.flat() ?? [];
+        const busy = state.courts.filter(c => c.match.id !== match.id && c.match.phase !== 'complete' && c.match.teams.flat().some(p => participants.includes(p)));
+        const recovery = state.completedMatches.filter(r => r.match.teams.flat().some(p => participants.includes(p))).map(r => ({ name: r.match.teams.flat().filter(p => participants.includes(p)).join(' / '), minutes: Math.max(0, Math.ceil((r.finishedAt + match.rules.matchRest * 60000 - Date.now()) / 60000)) })).filter(r => r.minutes > 0);
+        const readiness = completed ? 'Complete' : assigned ? assigned.match.phase === 'warmup' ? 'Assigned · warmup' : 'On court' : !resolved ? 'Awaiting semifinal results' : busy.length ? 'Players on Court ' + busy.map(c => c.id).join(', ') : recovery.length ? recovery.map(r => `${r.name} · ${r.minutes} min rest remaining`).join('; ') : 'Ready to play';
+        return <div className="upcoming-row" key={match.id}>
+          <div><span className="match-id">{match.id}</span><h3>{match.round}</h3><span className="estimate"><Clock size={13}/>{match.rules.estimatedMinutes} min estimated</span></div>
+          <div className="upcoming-players">{resolved ? <><span>{resolved.teams[0].join(' / ')}</span><small>vs</small><span>{resolved.teams[1].join(' / ')}</span></> : <span>{match.dependencies?.map(id => `Winner of ${id}`).join(' vs ')}</span>}</div>
+          <div><span>{match.format} · {match.format === 'Singles' ? 2 : 4} players</span><small>{match.rules.pace} · {match.rules.noAd ? 'No-Ad' : 'Advantage'} · v{match.rules.version}</small><small>{match.rules.changeover}s changeover · {match.rules.setRest}s set rest</small></div>
+          <div className="readiness"><span>{readiness}<small>{match.rules.matchRest === 0 ? 'No between-match rest required' : `${match.rules.matchRest} min recovery before this match`}</small></span></div>
+          <div className="court-assignment">{assigned ? <><b>Court {assigned.id}</b><span className="tiny-tag">ASSIGNED</span></> : completed ? <span>Result recorded</span> : projection ? <><b>Court {projection.court}</b><small>In ~{Math.ceil(projection.start)} min · projected</small></> : <span>No feasible projection</span>}{!assigned && !completed && <button className="queue-cancel" type="button" onClick={() => cancel(match.id)}><Trash size={14}/> Cancel match</button>}</div>
+        </div>;
+      })}</div>
   </section>;
 }
-export function ScheduleComparison({ state }: { state: DemoState }) {
-  const options = state.plan.options;
-  const best = options.reduce<Plan | undefined>((winner, item) => !winner || item.finish < winner.finish ? item : winner, undefined);
-  if (!best) return null;
-  return <details className="comparison" open={state.plan.status !== 'assigned'}><summary>{state.plan.status === 'assigned' ? 'Semifinal A assigned · View schedule comparison' : 'Compare schedules'}</summary>
-    <div className="comparison-heading"><div><span className="eyebrow">SCHEDULING OPTIONS</span><h2>Projected completion</h2></div><div className="finish-comparison"><span>{Math.max(...options.map(p => p.finish))}<small>MIN</small></span><span className="muted">vs</span><strong>{best.finish}<small>MIN</small></strong><b>PROJECTED FINISH</b></div></div>
-    <p className="muted">Read each court row from left to right. Times are minutes after Court 1 becomes free; card widths do not represent duration.</p>
-    <div className="plan-grid">{options.map(plan => <div className={'plan-card ' + (plan.first === best.first ? 'selected' : '')} key={plan.first}><div className="plan-title"><span>{plan.first === best.first ? <Check size={17}/> : <Clock size={17}/>} {plan.first === 'semifinal' ? 'Semifinal first' : 'Consolation first'}</span><strong>{plan.finish}<small> min</small></strong></div>{([1,2] as const).map(id => <div className="plan-lane" key={id}><b>COURT {id}</b><div>{plan.items.filter(i => i.court === id).sort((a,b) => a.start - b.start).map(item => <span className={'plan-match ' + (!item.projected && plan.first === best.first && state.plan.status === 'assigned' ? 'committed' : '')} key={item.match}><strong>{item.label}</strong><small>{item.start}–{item.end} min</small><em>{!item.projected && state.plan.status === 'assigned' ? 'Assigned' : item.match === 'M102' ? 'Remaining estimate' : 'Projected'}</em></span>)}</div></div>)}<div className="plan-note">{plan.first === best.first ? 'Starts the semifinal now. Consolation follows on Court 2.' : 'Starts consolation now. Semifinal follows on Court 2.'}</div></div>)}</div>
-    <div className="proof-strip">{['Result recorded', 'Court free', 'Twin updated', 'Plan validated', 'M103 assigned'].map((item, i) => <span key={item}><CheckCircleSmall/>{item}{i < 4 && <span aria-hidden="true">·</span>}</span>)}</div>
-    <div className="comparison-footer"><span>Times relative to Court 1 becoming free. Local fixture estimates.</span><span><Check size={14}/> No overlaps <Check size={14}/> Dependencies respected <Check size={14}/> Rest protected</span></div>
-  </details>;
+
+function newMatchDraft() {
+  const rules = paceRules({ version: 1, noAd: false, deciding: 'full', changeover: 90, pace: 'Standard', setRest: 120, matchRest: 10, estimatedMinutes: 20 }, 'Standard', 'Singles');
+  return { round: '', format: 'Singles' as MatchFormat, teams: [['', ''], ['', '']], pace: rules.pace, estimatedMinutes: defaultDuration('Singles', rules.pace), matchRest: rules.matchRest };
 }
-function CheckCircleSmall() { return <span className="proof-check"><Check size={11} weight="bold"/></span>; }
+
+export function OptimizationSavings({ state, optionsOverride }: { state: DemoState; optionsOverride?: Plan[] }) {
+  const options = optionsOverride ?? state.optimizationDecision?.options ?? state.plan.options;
+  if (options.length < 2) return null;
+  const best = options.reduce((a, b) => a.finish <= b.finish ? a : b);
+  const alternative = options.reduce((a, b) => a.finish >= b.finish ? a : b);
+  const saved = Math.floor(alternative.finish - best.finish);
+  if (saved <= 0) return null;
+  const first = best.items.find(i => i.match === best.firstMatch);
+  return <section className="optimization-savings" aria-label="Projected scheduling savings">
+    <div className="savings-number"><span className="eyebrow">PROJECTED TIME SAVED</span><strong>{saved}<small>MIN</small></strong><span>{Math.round(saved / alternative.finish * 100)}% shorter remaining schedule</span></div>
+    <div className="savings-explanation"><h2>{first?.label ?? 'Selected match'} first.</h2><p className="savings-finish"><span>{Math.ceil(alternative.finish)} min</span><span aria-hidden="true">→</span><strong>{Math.ceil(best.finish)} min</strong><span>to finish</span></p>
+      <p>{best.firstMatch === 'M104' ? 'Start the long singles match now. The mixed-doubles semifinal and final use the other court.' : 'Start the match that gives the shortest remaining tournament schedule.'}</p>
+      <small>{optionsOverride ? 'Based on the current queue projection.' : state.optimizationDecision ? `Assignment comparison saved at ${new Date(state.optimizationDecision.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : 'Based on current match-duration estimates.'} Both alternatives use the same rules and availability.</small>
+    </div>
+  </section>;
+}
+
+export function ScheduleComparison({ state, showSavings = true, optionsOverride }: { state: DemoState; showSavings?: boolean; optionsOverride?: Plan[] }) {
+  const decision = state.optimizationDecision;
+  const options = optionsOverride ?? decision?.options ?? state.plan.options;
+  const best = options.reduce<(typeof options)[number] | undefined>((a, b) => !a || b.finish < a.finish ? b : a, undefined);
+  if (!best) return <div className="schedule-placeholder"><Clock size={28}/><p>No feasible schedule in the current horizon. Check court availability and bracket dependencies before adding or canceling another match.</p></div>;
+  return <>{showSavings && <OptimizationSavings state={state} optionsOverride={optionsOverride}/>}<details className="comparison" open><summary>{decision && !optionsOverride ? 'The assignment decision' : 'Compare schedules'} · {options.length} feasible configurations · projected finish in {Math.ceil(best.finish)} min</summary>
+    <p className="muted">{decision && !optionsOverride ? 'Times are minutes from the saved assignment decision.' : 'Times are minutes from the current projection.'} Each option shows its best legal continuation. Match blocks are not drawn to scale. Future winners remain projections.</p>
+    <div className="plan-grid">{options.map(plan => <div className={'plan-card ' + (plan === best ? 'selected' : '')} key={plan.firstMatch ?? plan.first}>
+      <div className="plan-title"><span>{plan.items.find(i => i.match === plan.firstMatch)?.label ?? plan.first} first{plan === best ? ' · Selected' : ''}</span><strong>{Math.ceil(plan.finish)} min</strong></div>
+      {([1, 2] as const).map(court => <div className="plan-lane" key={court}><b>COURT {court}</b><div>{plan.items.filter(i => i.court === court).sort((a, b) => a.start - b.start).map(item => <span className="plan-match" key={item.match}><strong>{item.label}</strong><small>{Math.ceil(item.start)}–{Math.ceil(item.end)} min</small><em>{decision && plan === best && item.match === decision.assignedMatch && item.court === decision.court && item.start === 0 ? 'Assigned' : item.match === 'M102' ? 'Remaining estimate' : 'Projected'}</em></span>)}</div></div>)}
+    </div>)}</div><p className="comparison-footer">Uses configured duration estimates, player availability, bracket dependencies, and required rest. Replanned as scores and availability change.</p>
+  </details></>;
+}

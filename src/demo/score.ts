@@ -29,6 +29,7 @@ export function nextScore(match: Match, team: Team): Score | null {
   if (s.tieBreak) {
     if (s.points[team] >= 7 && s.points[team] - s.points[other] >= 2) {
       s.games[team]++;
+      s.serviceGame++;
       finishSet(s, match);
     }
     return s;
@@ -64,8 +65,14 @@ export function receiverName(match: Match) {
 export function isDecidingPoint(match: Match) {
   return match.rules.noAd && match.phase === 'playing' && match.score.points.every(p => p >= 3) && !match.score.tieBreak && !match.score.matchTieBreak;
 }
+const spokenPoints = new Set(['0', '15', '30', '40']);
+function splitCompactScore(value: string) {
+  if (!/^\d{4}$/.test(value)) return value;
+  const left = value.slice(0, 2); const right = value.slice(2);
+  return spokenPoints.has(left) && spokenPoints.has(right) ? left + ' ' + right : value;
+}
 export function normalizeCall(value: string): string {
-  return value.toLowerCase().trim().replace(/[.!?]/g, '').replace(/thirty/g, '30').replace(/fifteen/g, '15').replace(/forty/g, '40').replace(/love/g, '0').replace(/advantage/g, 'ad').replace(/deuce/g, '40 40').replace(/[-–—,]/g, ' ').replace(/\s+/g, ' ').replace(/^(\d+) all$/, '$1 $1');
+  return value.toLowerCase().trim().replace(/[.!?]/g, '').replace(/thirty/g, '30').replace(/fifteen/g, '15').replace(/forty/g, '40').replace(/love/g, '0').replace(/advantage/g, 'ad').replace(/deuce/g, '40 40').replace(/[-–—,]/g, ' ').replace(/\s+/g, ' ').replace(/^(\d+) all$/, '$1 $1').split(' ').map(splitCompactScore).join(' ');
 }
 export function resolveCall(match: Match, call: string): Team | null {
   const normalized = normalizeCall(call); const order = serverTeam(match);

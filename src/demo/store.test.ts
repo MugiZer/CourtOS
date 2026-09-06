@@ -18,7 +18,7 @@ const mem = new Map<string, string>();
 const store = await import('./store.ts');
 import { labels } from './score';
 
-beforeEach(() => store.resetDemo());
+beforeEach(() => store.resetDemo(false));
 
 test('touch awards route through CourtGuard and record the point', () => {
   store.awardPoint(2, 0);
@@ -61,7 +61,7 @@ test('M101 finishes through the engine and records the result', () => {
   assert.equal(c.match.phase, 'complete');
   assert.equal(c.match.score.winner, 0);
   assert.ok(store.getState().lastResult?.startsWith('Roy / Chen'));
-  store.resetDemo();
+  store.resetDemo(false);
 });
 
 test('undo restores the previous score and retains history', () => {

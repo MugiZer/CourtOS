@@ -31,20 +31,23 @@ const teamIdx = (t: TeamId): Team => (t === 'A' ? 0 : 1);
 
 const SOURCE: Record<CourtEvent['source'], EventSource> = {
   Touch: 'TOUCH',
-  'Voice preview': 'VOICE',
+  'Voice input': 'VOICE',
   Organizer: 'ORGANIZER',
-  Demo: 'SYSTEM',
+  Scenario: 'SYSTEM',
 };
+type RuleToggles = Pick<Rules, 'version' | 'noAd' | 'deciding' | 'changeover'>;
 
 // Demo Rules -> declarative definition. Mode comes from the player names
 // (DOUBLES iff 4 names); changeover seconds ride the toggles (validated by
 // definitionFromToggles, consumed by the changeover info, not the definition).
-export function toDefinition(rules: Rules, playerNames: string[]): RulesetDefinition {
+export function toDefinition(rules: RuleToggles, playerNames: string[]): RulesetDefinition {
   const toggles: DemoToggles = {
     mode: playerNames.length === 4 ? 'DOUBLES' : 'SINGLES',
     noAd: rules.noAd,
     deciding: rules.deciding === 'tiebreak' ? 'MATCH_TIEBREAK' : 'FULL_SET',
-    changeoverSec: rules.changeover,
+    // CourtGuard does not model Express rest periods; keep its structural
+    // toggle valid while the demo scorer treats a zero-length break locally.
+    changeoverSec: rules.changeover === 0 ? 60 : rules.changeover,
   };
   return definitionFromToggles(toggles, RULESET_ID, rules.version);
 }
@@ -104,8 +107,8 @@ export function toMatchState(match: Match, courtId: string): MatchState {
   };
 }
 
-// Engine state -> demo Score. serviceGame carries forward (one increment per
-// completed game, exactly like the legacy scorer: never inside a tiebreak).
+// Engine state -> demo Score. serviceGame carries forward one increment per
+// completed game, including a set tiebreak but excluding a match tiebreak.
 // In a tiebreak the flag is tieBreak vs matchTieBreak by context (deciding
 // tiebreak + split sets = MTB).
 export function toDisplay(next: MatchState, prev: Score, rules: Rules): Score {
@@ -115,7 +118,7 @@ export function toDisplay(next: MatchState, prev: Score, rules: Rules): Score {
   const games: [number, number] = [next.games[0], next.games[1]];
   const gamesChanged = games[0] !== prev.games[0] || games[1] !== prev.games[1];
   const gameWon =
-    !prev.tieBreak && !prev.matchTieBreak && (gamesChanged || (next.winner !== null && prev.winner === null));
+    !prev.matchTieBreak && (gamesChanged || (next.winner !== null && prev.winner === null));
   let tieBreak = false;
   let matchTieBreak = false;
   if (next.inTiebreak) {
@@ -294,13 +297,13 @@ export function confirmAll(matchId: string): void {
 // on (e.g. a localStorage snapshot from a newer session).
 let upcoming: RulesetStore | null = null;
 
-export function publishDemoRules(rules: Rules): RulesetDefinition {
+export function publishDemoRules(rules: RuleToggles): RulesetDefinition {
   const mode = upcoming?.current.definition.participants.mode ?? 'DOUBLES';
   const toggles: DemoToggles = {
     mode,
     noAd: rules.noAd,
     deciding: rules.deciding === 'tiebreak' ? 'MATCH_TIEBREAK' : 'FULL_SET',
-    changeoverSec: rules.changeover,
+    changeoverSec: rules.changeover === 0 ? 60 : rules.changeover,
   };
   if (!upcoming || upcoming.current.definition.version !== rules.version - 1) {
     upcoming = createStore(

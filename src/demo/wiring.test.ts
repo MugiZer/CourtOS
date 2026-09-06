@@ -27,7 +27,7 @@ import { compiledFor } from './guard-adapter';
 import { io } from 'socket.io-client';
 
 beforeEach(() => {
-  store.resetDemo();
+  store.resetDemo(false);
   confirmAll('M101');
   confirmAll('M102');
   confirmAll('M103');
@@ -51,7 +51,7 @@ test('voice-resolve-via-engine: golden calls commit as SCORE_CALL', () => {
   const rec = pendingFor('M102').at(-1)!;
   assert.equal(rec.decision, 'ACCEPTED');
   assert.equal((rec.proposedIntent as { type: string }).type, 'SCORE_CALL');
-  store.resetDemo();
+  store.resetDemo(false);
   confirmAll('M102');
   store.submitCall(2, 'Love-fifteen');
   c = store.getState().courts[1];
@@ -88,7 +88,7 @@ test('voice-resolve-via-engine: ambiguity goes to confirmation', () => {
 test('voice shortcuts stay identical (correction/yes/no)', () => {
   store.submitCall(2, 'correction');
   assert.equal(store.getState().courts[1].decision.type, 'correction');
-  store.resetDemo();
+  store.resetDemo(false);
   confirmAll('M102');
   store.requestConfirmation(2);
   assert.equal(store.getState().courts[1].decision.type, 'confirmation');
@@ -107,7 +107,7 @@ test('choices-from-engine: same labels, engine underneath', () => {
   freshNoAd4040();
   const deciding = store.legalChoices(store.getState().courts[0]);
   assert.deepEqual(deciding, ['Game', 'Game']);
-  store.resetDemo();
+  store.resetDemo(false);
   store.requestConfirmation(2);
   assert.equal(store.getState().courts[1].decision.candidate, '15–0');
 });
@@ -164,7 +164,7 @@ test('reject-emitted-and-replayed: REJECTED lands in the twin log and replays', 
     confirmAll('M102');
     disconnect();
     await server.close();
-    store.resetDemo();
+    store.resetDemo(false);
   }
 });
 
@@ -219,10 +219,12 @@ test('dashboard shows remote rejected-call alert with engine reason', async () =
     scorer.disconnect();
     disconnect();
     await server.close();
-    store.resetDemo();
+    store.resetDemo(false);
     confirmAll('M102');
   }
 });
+ 
+test('two-tab dashboard catch-up vs real in-process server', async () => {
   const server: CourtServer = await createCourtServer({ seed: { courts: ['c1', 'c2'] } });
   await online(server.url);
   const off = store.subscribeDashboard();
@@ -265,7 +267,7 @@ test('dashboard shows remote rejected-call alert with engine reason', async () =
     scorer.disconnect();
     disconnect();
     await server.close();
-    store.resetDemo();
+    store.resetDemo(false);
     confirmAll('M102');
   }
 });
