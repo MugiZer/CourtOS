@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from 'react';
 import { initialState, initialCourt, semifinal } from './fixtures';
 import { freshScore, isDecidingPoint, labels, nextScore, normalizeCall, resolveCall, scoreText } from './score';
+import { ackRecord, commitDispute, commitPoint, commitRollback, confirmAll, noteAccepted, pendingFor, publishDemoRules } from './guard-adapter';
+import type { GuardCommit } from './guard-adapter';
+import { emitCourtEvent, isConnected, syncCourt } from './sync';
+import type { MatchEventRecord } from '../../shared/types.ts';
 import { compareSchedules } from './schedule';
 import { timeCallDue } from './changeover';
 import type { Court, CourtEvent, CourtId, DemoState, EventKind, Rules, Team } from './types';
@@ -36,6 +40,26 @@ function event(c: Court, kind: EventKind, title: string, detail: string, source:
   if (!c.online) c.pending++; else c.remoteMatch = structuredClone(c.match);
   return c.events.at(-1)!;
 }
+const courtKey = (id: CourtId) => 'c' + id;
+// Build the server envelope for an accepted commit (same demo event id +
+// sequence, single sequence space) and emit it when a server is connected.
+// The demo event stays unacknowledged until the server ACKs it.
+function trackAccepted(id: CourtId, source: CourtEvent['source'], commit: GuardCommit, heard?: string) {
+  const ev = state.courts[id - 1].events.at(-1)!;
+  const record: MatchEventRecord = noteAccepted({ matchId: ev.matchId, id: ev.id, sequence: ev.sequence, courtId: courtKey(id), source, commit, transcript: heard });
+  if (state.courts[id - 1].online && isConnected()) {
+    emitCourtEvent(record).then(
+      () => { ackRecord(record.matchId, ev.id); markAcknowledged(id, ev.id); },
+      () => { markUnacked(id, ev.id); },
+    );
+  }
+}
+export function markAcknowledged(id: CourtId, eventId: string) {
+  update(s => { const e = s.courts[id - 1].events.find(e => e.id === eventId); if (e) e.acknowledged = true; });
+}
+function markUnacked(id: CourtId, eventId: string) {
+  update(s => { const c = s.courts[id - 1]; const e = c.events.find(e => e.id === eventId); if (e) { e.acknowledged = false; c.pending++; } });
+}
 export function markSeen(id: CourtId) { update(s => { const c = s.courts[id - 1]; c.seenThrough = c.events.at(-1)?.sequence ?? 0; }); }
 export function selectReceiver(id: CourtId, side: 'deuce' | 'ad') {
   update(s => { const c = s.courts[id - 1]; c.match.receiverSide = side; if (c.online) c.remoteMatch = structuredClone(c.match); });
@@ -43,11 +67,23 @@ export function selectReceiver(id: CourtId, side: 'deuce' | 'ad') {
 export function awardPoint(id: CourtId, team: Team, source: CourtEvent['source'] = 'Touch', heard?: string) {
   const before = state.courts[id - 1];
   if (before.rallyStartedAt && Date.now() - before.rallyStartedAt < 4200) return;
-  const next = nextScore(before.match, team);
-  if (!next) {
-    if (isDecidingPoint(before.match) && !before.match.receiverSide) update(s => { s.courts[id - 1].decision = { type: 'unclear', title: 'Choose the receiving side', detail: 'The receiving team chooses the side for the deciding point.' }; });
+  if (before.match.phase !== 'playing' && before.match.phase !== 'dispute') return;
+  if (before.match.phase === 'playing' && isDecidingPoint(before.match) && !before.match.receiverSide) {
+    update(s => { s.courts[id - 1].decision = { type: 'unclear', title: 'Choose the receiving side', detail: 'The receiving team chooses the side for the deciding point.' }; });
     return;
   }
+  const commit = commitPoint(before.match, courtKey(id), team);
+  const next = commit.score;
+  if (!commit.accepted || !next || !commit.nextMs) {
+    const reason = commit.reason ?? 'ILLEGAL_TRANSITION';
+    update(s => {
+      const c = s.courts[id - 1];
+      c.decision = { type: 'blocked', title: 'Call blocked', detail: 'CourtGuard rejected the point (' + reason + '). Score unchanged.', heard };
+      event(c, 'blocked', 'Score call blocked', 'Reason ' + reason + '. Score unchanged.', source);
+    });
+    return;
+  }
+  const willEmit = isConnected() && before.online;
   update(s => {
     const c = s.courts[id - 1]; const previous = scoreText(c.match.score);
     const gamesChanged = c.match.score.serviceGame !== next.serviceGame;
@@ -58,10 +94,12 @@ export function awardPoint(id: CourtId, team: Team, source: CourtEvent['source']
       detail: heard ? 'Heard: “' + heard + '”' : 'Point for ' + c.match.teams[team].map(name => name.split(' ').at(-1)).join(' / '), heard };
     const accepted = event(c, 'point', next.winner !== null ? 'Match complete' : 'Point accepted', previous + ' → ' + (next.winner !== null ? 'Match complete' : scoreText(next)), source);
     accepted.previousScore = structuredClone(before.match.score);
+    if (willEmit) accepted.acknowledged = false;
     if (next.winner !== null && id === 1 && c.match.id === 'M101') {
       s.lastResult = 'Roy / Chen · ' + next.sets.map(set => set.join('–')).join(', ');
     }
   });
+  trackAccepted(id, source, commit, heard);
   if (next.winner !== null && id === 1 && before.match.id === 'M101' && before.online) scheduleNext();
 }
 export function submitCall(id: CourtId, text: string) {
@@ -96,12 +134,26 @@ export function undoPoint(id: CourtId) {
   const index = c.events.findLastIndex(e => e.kind === 'point' && e.matchId === c.match.id && !reverted.has(e.id));
   if (index < 0) return;
   const previous = c.events[index].previousScore ?? c.events.slice(0, index).findLast(e => e.matchId === c.match.id)?.score ?? (c.match.id === 'M103' ? freshScore() : initialCourt(id).match.score);
+  const commit = commitRollback(c.match, courtKey(id), previous);
+  if (!commit.accepted || !commit.score || !commit.nextMs) {
+    const reason = commit.reason ?? 'ILLEGAL_TRANSITION';
+    update(s => {
+      const court = s.courts[id - 1];
+      court.decision = { type: 'blocked', title: 'Correction blocked', detail: 'CourtGuard rejected the rollback (' + reason + '). Score unchanged.' };
+      event(court, 'blocked', 'Correction blocked', 'Reason ' + reason + '. Score unchanged.', 'Touch');
+    });
+    return;
+  }
+  const restored = commit.score;
+  const willEmit = isConnected() && c.online;
   update(s => {
-    const court = s.courts[id - 1]; court.match.score = structuredClone(previous); court.match.phase = 'playing'; court.rallyStartedAt = null;
+    const court = s.courts[id - 1]; court.match.score = structuredClone(restored); court.match.phase = 'playing'; court.rallyStartedAt = null;
     court.decision = { type: 'ready', title: 'Point undone', detail: 'Now award the point to the correct team.' };
-    const correction = event(court, 'correction', 'Point undone', 'Restored ' + scoreText(previous) + '. Original event retained.', 'Touch');
+    const correction = event(court, 'correction', 'Point undone', 'Restored ' + scoreText(restored) + '. Original event retained.', 'Touch');
     correction.reverts = c.events[index].id;
+    if (willEmit) correction.acknowledged = false;
   });
+  trackAccepted(id, 'Touch', commit);
 }
 export function dismissDecision(id: CourtId) {
   update(s => { s.courts[id - 1].decision = { type: 'ready', title: 'Ready for your call', detail: 'Call the score, or award a point below.' }; });
@@ -123,24 +175,57 @@ export function setOnline(id: CourtId, online: boolean) {
   });
   const c = state.courts[id - 1];
   if (online && id === 1 && c.match.id === 'M101' && c.match.phase === 'complete' && state.plan.status === 'idle') scheduleNext();
+  if (online && isConnected()) {
+    const batch = pendingFor(c.match.id);
+    if (batch.length) void syncCourt(courtKey(id), c.match.id, batch).then(() => { confirmAll(c.match.id); }, () => {});
+  }
 }
 export function dispute(id: CourtId) {
-  if (state.courts[id - 1].match.phase !== 'playing') return;
+  const before = state.courts[id - 1];
+  if (before.match.phase !== 'playing') return;
+  const commit = commitDispute(before.match, courtKey(id));
+  if (!commit.accepted || !commit.nextMs) {
+    const reason = commit.reason ?? 'ILLEGAL_TRANSITION';
+    update(s => {
+      const c = s.courts[id - 1];
+      c.decision = { type: 'blocked', title: 'Dispute blocked', detail: 'CourtGuard rejected the freeze (' + reason + ').' };
+      event(c, 'blocked', 'Dispute blocked', 'Reason ' + reason + '. Score unchanged.', 'Organizer');
+    });
+    return;
+  }
+  const willEmit = isConnected() && before.online;
   update(s => {
     const c = s.courts[id - 1]; c.match.phase = 'dispute'; c.rallyStartedAt = null;
-    event(c, 'dispute', 'Players disputed a point', 'Scoring frozen at ' + scoreText(c.match.score) + '.', 'Organizer');
+    const ev = event(c, 'dispute', 'Players disputed a point', 'Scoring frozen at ' + scoreText(c.match.score) + '.', 'Organizer');
+    if (willEmit) ev.acknowledged = false;
   });
+  trackAccepted(id, 'Organizer', commit);
 }
 export function restoreEvent(id: CourtId, eventId: string) {
   const c = state.courts[id - 1]; if (!c.online || c.match.phase !== 'dispute') return;
   const target = c.events.find(e => e.id === eventId && e.matchId === c.match.id && e.kind === 'point'); if (!target || target.score.winner !== null) return;
+  const commit = commitRollback(c.match, courtKey(id), target.score);
+  if (!commit.accepted || !commit.score || !commit.nextMs) {
+    const reason = commit.reason ?? 'ILLEGAL_TRANSITION';
+    update(s => {
+      const court = s.courts[id - 1];
+      court.decision = { type: 'blocked', title: 'Restore blocked', detail: 'CourtGuard rejected the rollback (' + reason + '). Still frozen.' };
+      event(court, 'blocked', 'Restore blocked', 'Reason ' + reason + '. Still frozen.', 'Organizer');
+    });
+    return;
+  }
+  const restored = commit.score;
+  const willEmit = isConnected() && c.online;
   update(s => {
-    const court = s.courts[id - 1]; court.match.score = structuredClone(target.score); court.match.phase = 'playing';
-    court.decision = { type: 'accepted', title: 'Dispute resolved', detail: 'Restored ' + scoreText(target.score) + '. Play can resume.' };
-    event(court, 'resumed', 'Score restored · play resumed', 'Returned to event ' + target.sequence + ' (' + scoreText(target.score) + '). History retained.', 'Organizer');
+    const court = s.courts[id - 1]; court.match.score = structuredClone(restored); court.match.phase = 'playing';
+    court.decision = { type: 'accepted', title: 'Dispute resolved', detail: 'Restored ' + scoreText(restored) + '. Play can resume.' };
+    const ev = event(court, 'resumed', 'Score restored · play resumed', 'Returned to event ' + target.sequence + ' (' + scoreText(restored) + '). History retained.', 'Organizer');
+    if (willEmit) ev.acknowledged = false;
   });
+  trackAccepted(id, 'Organizer', commit);
 }
 export function publishRules(rules: Omit<Rules, 'version'>) {
+  publishDemoRules({ ...rules, version: state.upcomingRules.version + 1 });
   update(s => {
     s.upcomingRules = { ...rules, version: s.upcomingRules.version + 1 }; s.rulesPublished = true;
     for (const c of s.courts) event(c, 'rules', 'Upcoming rules published', 'Active match keeps v' + c.match.rules.version + '. ' + (c.online ? 'Policy received.' : 'Delivery pending.'), 'Organizer');
