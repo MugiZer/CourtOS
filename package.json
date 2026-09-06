@@ -2,9 +2,11 @@
   "name": "courtos",
   "version": "1.0.0",
   "description": "CourtOS is a starting point for a court-focused application.",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "tsx --test src/demo/*.test.ts courtguard/*.test.ts courtguard/rules/*.test.ts optimizer/*.test.ts server/*.test.ts shared/*.test.ts voice/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -19,6 +21,24 @@
   "homepage": "https://github.com/MugiZer/CourtOS#readme",
   "dependencies": {
     "socket.io": "4.8.1",
-    "socket.io-client": "4.8.1"
+    "socket.io-client": "4.8.1",
+    "@fontsource/barlow-condensed": "latest",
+    "@fontsource/geist": "latest",
+    "@phosphor-icons/react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "three": "latest"
+  },
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/three": "latest",
+    "@vitejs/plugin-react": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest"
   }
 }

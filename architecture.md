@@ -1419,6 +1419,12 @@ Use this section for future decisions. Replace obsolete decisions explicitly rat
 
 **Reason:** improves robustness while keeping latency, cost, and implementation complexity low.
 
+### ADR-014 — Whisper is the primary ASR model
+
+**Decision:** use OpenAI Whisper as the primary ASR model, configured through environment variables. The default local model is `base.en` on CPU.
+
+**Reason:** provides a reproducible local English transcription baseline while preserving the existing authority boundary: Whisper proposes text; tennis intent normalization and CourtGuard decide what is accepted.
+
 ---
 
 ### ADR-003 — State-constrained voice interpretation

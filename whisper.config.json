@@ -1,0 +1,6 @@
+{
+  "model": "base.en",
+  "device": "cpu",
+  "language": "en",
+  "task": "transcribe"
+}
