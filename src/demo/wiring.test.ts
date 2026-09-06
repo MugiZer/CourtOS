@@ -17,7 +17,7 @@ const mem = new Map<string, string>();
 const store = await import('./store.ts');
 import { scoreText } from './score';
 import { initialMatch } from './fixtures';
-import { commitPoint, confirmAll, engineOptions, noteAccepted, pendingFor, toDefinition } from './guard-adapter';
+import { commitPoint, commitScoreCall, confirmAll, engineOptions, noteAccepted, noteRejected, pendingFor, toDefinition } from './guard-adapter';
 import { connect, disconnect, syncCourt } from './sync';
 import { createCourtServer } from '../../server/index.ts';
 import type { CourtServer } from '../../server/index.ts';
@@ -168,7 +168,61 @@ test('reject-emitted-and-replayed: REJECTED lands in the twin log and replays', 
   }
 });
 
-test('two-tab dashboard catch-up vs real in-process server', async () => {
+test('dashboard shows remote rejected-call alert with engine reason', async () => {
+  const server: CourtServer = await createCourtServer({ seed: { courts: ['c1', 'c2'] } });
+  await online(server.url);
+  const off = store.subscribeDashboard();
+  const scorer = io(server.url);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('SCORER_TIMEOUT')), 10000);
+    if (scorer.connected) {
+      clearTimeout(timer);
+      resolve();
+    } else {
+      scorer.once('connect', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    }
+  });
+  try {
+    await syncCourt('c2', 'M102', []);
+    // Court tab: one legal point, then an impossible call the engine rejects.
+    const m = initialMatch(2);
+    const first = commitPoint(m, 'c2', 0);
+    assert.equal(first.accepted, true);
+    m.score = first.score!;
+    const rec1 = noteAccepted({ matchId: m.id, id: 'dash-rej-1', sequence: 1, courtId: 'c2', source: 'Touch', commit: first });
+    const a1 = await new Promise<{ ok: boolean }>((resolve, reject) => {
+      scorer.emit('court:event', { event: rec1 }, (res: { ok: boolean }) => resolve(res));
+      setTimeout(() => reject(new Error('EMIT_TIMEOUT')), 5000);
+    });
+    assert.equal(a1.ok, true);
+    await waitFor(() => store.getState().courts[1].remoteMatch.score.points.join(',') === '1,0');
+    const bad = commitScoreCall(m, 'c2', { serverPoints: 999, receiverPoints: 999 }, 'Thirty-love');
+    assert.equal(bad.accepted, false);
+    const reason = bad.reason ?? 'ILLEGAL_TRANSITION';
+    const rec2 = noteRejected({ matchId: m.id, id: 'dash-rej-2', sequence: 2, courtId: 'c2', source: 'Touch', commit: bad, transcript: 'Thirty-love' });
+    const a2 = await new Promise<{ ok: boolean }>((resolve, reject) => {
+      scorer.emit('court:event', { event: rec2 }, (res: { ok: boolean }) => resolve(res));
+      setTimeout(() => reject(new Error('EMIT_TIMEOUT')), 5000);
+    });
+    assert.equal(a2.ok, true);
+    // Dashboard tab catches up: blocked card carries the engine reason.
+    await waitFor(() => store.getState().courts[1].decision.type === 'blocked');
+    const d = store.getState().courts[1].decision;
+    assert.equal(d.title, 'Call blocked');
+    assert.ok(d.detail.includes(reason));
+    confirmAll('M102');
+  } finally {
+    off();
+    scorer.disconnect();
+    disconnect();
+    await server.close();
+    store.resetDemo();
+    confirmAll('M102');
+  }
+});
   const server: CourtServer = await createCourtServer({ seed: { courts: ['c1', 'c2'] } });
   await online(server.url);
   const off = store.subscribeDashboard();

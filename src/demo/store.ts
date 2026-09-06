@@ -7,7 +7,7 @@ import { emitCourtEvent, isConnected, onAssignmentUpdate, onCourtUpdate, onRules
 import type { MatchEventRecord, MatchState } from '../../shared/types.ts';
 import { compareSchedules } from './schedule';
 import { timeCallDue } from './changeover';
-import type { Court, CourtEvent, CourtId, DemoState, EventKind, Rules, Team } from './types';
+import type { Court, CourtEvent, CourtId, DemoState, EventKind, Rules, Score, Team } from './types';
 
 const KEY = 'courtos.frontend-preview.v1';
 function readStored(): DemoState {
@@ -41,12 +41,15 @@ function event(c: Court, kind: EventKind, title: string, detail: string, source:
   return c.events.at(-1)!;
 }
 const courtKey = (id: CourtId) => 'c' + id;
-// Build the server envelope for an accepted commit (same demo event id +
-// sequence, single sequence space) and emit it when a server is connected.
-// The demo event stays unacknowledged until the server ACKs it.
-function trackAccepted(id: CourtId, source: CourtEvent['source'], commit: GuardCommit, heard?: string) {
+// Single server-envelope path for accepted + rejected commits (same demo
+// event id + sequence, single sequence space). The branch preserves the
+// noteAccepted/noteRejected guards; the demo event stays unacknowledged
+// until the server ACKs it.
+function track(id: CourtId, source: CourtEvent['source'], commit: GuardCommit, heard?: string) {
   const ev = state.courts[id - 1].events.at(-1)!;
-  const record: MatchEventRecord = noteAccepted({ matchId: ev.matchId, id: ev.id, sequence: ev.sequence, courtId: courtKey(id), source, commit, transcript: heard });
+  const record: MatchEventRecord = commit.accepted
+    ? noteAccepted({ matchId: ev.matchId, id: ev.id, sequence: ev.sequence, courtId: courtKey(id), source, commit, transcript: heard })
+    : noteRejected({ matchId: ev.matchId, id: ev.id, sequence: ev.sequence, courtId: courtKey(id), source, commit, transcript: heard });
   if (state.courts[id - 1].online && isConnected()) {
     emitCourtEvent(record).then(
       () => { ackRecord(record.matchId, ev.id); markAcknowledged(id, ev.id); },
@@ -54,15 +57,28 @@ function trackAccepted(id: CourtId, source: CourtEvent['source'], commit: GuardC
     );
   }
 }
-function trackRejected(id: CourtId, source: CourtEvent['source'], commit: GuardCommit, heard?: string) {
-  const ev = state.courts[id - 1].events.at(-1)!;
-  const record: MatchEventRecord = noteRejected({ matchId: ev.matchId, id: ev.id, sequence: ev.sequence, courtId: courtKey(id), source, commit, transcript: heard });
-  if (state.courts[id - 1].online && isConnected()) {
-    emitCourtEvent(record).then(
-      () => { ackRecord(record.matchId, ev.id); markAcknowledged(id, ev.id); },
-      () => { markUnacked(id, ev.id); },
-    );
-  }
+// One shared accepted-point block: awardPoint and the voice single-hit path
+// differed only in source/heard (voice always passes its transcript, so the
+// Heard detail is identical). Rejected paths keep their own copy.
+function applyAccepted(id: CourtId, source: CourtEvent['source'], commit: GuardCommit, next: Score, before: Court, team: Team, heard?: string) {
+  const willEmit = isConnected() && before.online;
+  update(s => {
+    const c = s.courts[id - 1]; const previous = scoreText(c.match.score);
+    const gamesChanged = c.match.score.serviceGame !== next.serviceGame;
+    c.match.score = next; c.rallyStartedAt = null;
+    c.match.receiverSide = null;
+    if (next.winner !== null) c.match.phase = 'complete';
+    c.decision = { type: 'accepted', title: next.winner !== null ? 'Game. Set. Match.' : gamesChanged ? 'Game won' : 'Point accepted',
+      detail: heard ? 'Heard: “' + heard + '”' : 'Point for ' + c.match.teams[team].map(name => name.split(' ').at(-1)).join(' / '), heard };
+    const accepted = event(c, 'point', next.winner !== null ? 'Match complete' : 'Point accepted', previous + ' → ' + (next.winner !== null ? 'Match complete' : scoreText(next)), source);
+    accepted.previousScore = structuredClone(before.match.score);
+    if (willEmit) accepted.acknowledged = false;
+    if (next.winner !== null && id === 1 && c.match.id === 'M101') {
+      s.lastResult = 'Roy / Chen · ' + next.sets.map(set => set.join('–')).join(', ');
+    }
+  });
+  track(id, source, commit, heard);
+  if (next.winner !== null && id === 1 && before.match.id === 'M101' && before.online) scheduleNext();
 }
 export function markAcknowledged(id: CourtId, eventId: string) {
   update(s => { const e = s.courts[id - 1].events.find(e => e.id === eventId); if (e) e.acknowledged = true; });
@@ -91,27 +107,10 @@ export function awardPoint(id: CourtId, team: Team, source: CourtEvent['source']
       c.decision = { type: 'blocked', title: 'Call blocked', detail: 'CourtGuard rejected the point (' + reason + '). Score unchanged.', heard };
       event(c, 'blocked', 'Score call blocked', 'Reason ' + reason + '. Score unchanged.', source);
     });
-    trackRejected(id, source, commit, heard);
+    track(id, source, commit, heard);
     return;
   }
-  const willEmit = isConnected() && before.online;
-  update(s => {
-    const c = s.courts[id - 1]; const previous = scoreText(c.match.score);
-    const gamesChanged = c.match.score.serviceGame !== next.serviceGame;
-    c.match.score = next; c.rallyStartedAt = null;
-    c.match.receiverSide = null;
-    if (next.winner !== null) c.match.phase = 'complete';
-    c.decision = { type: 'accepted', title: next.winner !== null ? 'Game. Set. Match.' : gamesChanged ? 'Game won' : 'Point accepted',
-      detail: heard ? 'Heard: “' + heard + '”' : 'Point for ' + c.match.teams[team].map(name => name.split(' ').at(-1)).join(' / '), heard };
-    const accepted = event(c, 'point', next.winner !== null ? 'Match complete' : 'Point accepted', previous + ' → ' + (next.winner !== null ? 'Match complete' : scoreText(next)), source);
-    accepted.previousScore = structuredClone(before.match.score);
-    if (willEmit) accepted.acknowledged = false;
-    if (next.winner !== null && id === 1 && c.match.id === 'M101') {
-      s.lastResult = 'Roy / Chen · ' + next.sets.map(set => set.join('–')).join(', ');
-    }
-  });
-  trackAccepted(id, source, commit, heard);
-  if (next.winner !== null && id === 1 && before.match.id === 'M101' && before.online) scheduleNext();
+  applyAccepted(id, source, commit, next, before, team, heard);
 }
 export function submitCall(id: CourtId, text: string) {
   const call = normalizeCall(text);
@@ -133,27 +132,10 @@ export function submitCall(id: CourtId, text: string) {
         c.decision = { type: 'blocked', title: 'Call blocked', detail: 'That score is not a legal next point from ' + scoreText(c.match.score) + '. CourtGuard rejected the call (' + reason + ').', heard: text };
         event(c, 'blocked', 'Score call blocked', 'Heard “' + text + '”. Reason ' + reason + '. Score unchanged.', 'Voice preview');
       });
-      trackRejected(id, 'Voice preview', commit, text);
+      track(id, 'Voice preview', commit, text);
       return;
     }
-    const willEmit = isConnected() && before.online;
-    update(s => {
-      const c = s.courts[id - 1]; const previous = scoreText(c.match.score);
-      const gamesChanged = c.match.score.serviceGame !== next.serviceGame;
-      c.match.score = next; c.rallyStartedAt = null;
-      c.match.receiverSide = null;
-      if (next.winner !== null) c.match.phase = 'complete';
-      c.decision = { type: 'accepted', title: next.winner !== null ? 'Game. Set. Match.' : gamesChanged ? 'Game won' : 'Point accepted',
-        detail: 'Heard: “' + text + '”', heard: text };
-      const accepted = event(c, 'point', next.winner !== null ? 'Match complete' : 'Point accepted', previous + ' → ' + (next.winner !== null ? 'Match complete' : scoreText(next)), 'Voice preview');
-      accepted.previousScore = structuredClone(before.match.score);
-      if (willEmit) accepted.acknowledged = false;
-      if (next.winner !== null && id === 1 && c.match.id === 'M101') {
-        s.lastResult = 'Roy / Chen · ' + next.sets.map(set => set.join('–')).join(', ');
-      }
-    });
-    trackAccepted(id, 'Voice preview', commit, text);
-    if (next.winner !== null && id === 1 && before.match.id === 'M101' && before.online) scheduleNext();
+    applyAccepted(id, 'Voice preview', commit, next, before, hits[0].team, text);
     return;
   }
   if (hits.length > 1) {
@@ -168,7 +150,7 @@ export function submitCall(id: CourtId, text: string) {
     c.decision = { type: 'blocked', title: 'Call blocked', detail: 'That score is not a legal next point from ' + scoreText(c.match.score) + '. CourtGuard rejected the call (' + reason + ').', heard: text };
     event(c, 'blocked', 'Score call blocked', 'Heard “' + text + '”. Reason ' + reason + '. Score unchanged.', 'Voice preview');
   });
-  trackRejected(id, 'Voice preview', probe, text);
+  track(id, 'Voice preview', probe, text);
 }
 export function openCorrection(id: CourtId, source: CourtEvent['source'] = 'Touch') {
   if (state.courts[id - 1].match.phase !== 'playing') return;
@@ -195,7 +177,7 @@ export function undoPoint(id: CourtId) {
       court.decision = { type: 'blocked', title: 'Correction blocked', detail: 'CourtGuard rejected the rollback (' + reason + '). Score unchanged.' };
       event(court, 'blocked', 'Correction blocked', 'Reason ' + reason + '. Score unchanged.', 'Touch');
     });
-    trackRejected(id, 'Touch', commit);
+    track(id, 'Touch', commit);
     return;
   }
   const restored = commit.score;
@@ -207,7 +189,7 @@ export function undoPoint(id: CourtId) {
     correction.reverts = c.events[index].id;
     if (willEmit) correction.acknowledged = false;
   });
-  trackAccepted(id, 'Touch', commit);
+  track(id, 'Touch', commit);
 }
 export function dismissDecision(id: CourtId) {
   update(s => { s.courts[id - 1].decision = { type: 'ready', title: 'Ready for your call', detail: 'Call the score, or award a point below.' }; });
@@ -248,7 +230,7 @@ export function dispute(id: CourtId) {
       c.decision = { type: 'blocked', title: 'Dispute blocked', detail: 'CourtGuard rejected the freeze (' + reason + ').' };
       event(c, 'blocked', 'Dispute blocked', 'Reason ' + reason + '. Score unchanged.', 'Organizer');
     });
-    trackRejected(id, 'Organizer', commit);
+    track(id, 'Organizer', commit);
     return;
   }
   const willEmit = isConnected() && before.online;
@@ -257,7 +239,7 @@ export function dispute(id: CourtId) {
     const ev = event(c, 'dispute', 'Players disputed a point', 'Scoring frozen at ' + scoreText(c.match.score) + '.', 'Organizer');
     if (willEmit) ev.acknowledged = false;
   });
-  trackAccepted(id, 'Organizer', commit);
+  track(id, 'Organizer', commit);
 }
 export function restoreEvent(id: CourtId, eventId: string) {
   const c = state.courts[id - 1]; if (!c.online || c.match.phase !== 'dispute') return;
@@ -270,7 +252,7 @@ export function restoreEvent(id: CourtId, eventId: string) {
       court.decision = { type: 'blocked', title: 'Restore blocked', detail: 'CourtGuard rejected the rollback (' + reason + '). Still frozen.' };
       event(court, 'blocked', 'Restore blocked', 'Reason ' + reason + '. Still frozen.', 'Organizer');
     });
-    trackRejected(id, 'Organizer', commit);
+    track(id, 'Organizer', commit);
     return;
   }
   const restored = commit.score;
@@ -281,7 +263,7 @@ export function restoreEvent(id: CourtId, eventId: string) {
     const ev = event(court, 'resumed', 'Score restored · play resumed', 'Returned to event ' + target.sequence + ' (' + scoreText(restored) + '). History retained.', 'Organizer');
     if (willEmit) ev.acknowledged = false;
   });
-  trackAccepted(id, 'Organizer', commit);
+  track(id, 'Organizer', commit);
 }
 export function publishRules(rules: Omit<Rules, 'version'>) {
   publishDemoRules({ ...rules, version: state.upcomingRules.version + 1 });
@@ -384,10 +366,23 @@ function applyEngineRemote(id: CourtId, ms: MatchState) {
 function idxForCourt(courtId: string): CourtId | null {
   return courtId === 'c1' ? 1 : courtId === 'c2' ? 2 : null;
 }
-export function applyCourtUpdate(p: { courtId: string; matchId: string; state: MatchState | null }) {
-  if (!p.state) return;
+export function applyCourtUpdate(p: { courtId: string; matchId: string; state: MatchState | null; events?: MatchEventRecord[] }) {
   const id = idxForCourt(p.courtId);
-  if (id) applyEngineRemote(id, p.state);
+  if (!id) return;
+  // The wire already carries the REJECTED + engine reason audit proved
+  // arrives; surface it only when the latest broadcast event is the
+  // rejection (a later ACCEPTED means the call did not stick). Same
+  // blocked card the scoring tab renders: no new components or shapes.
+  const last = p.events?.at(-1);
+  const reason = last?.decision === 'REJECTED' ? last.rejectionReason : undefined;
+  if (!p.state && !reason) return;
+  if (p.state) applyEngineRemote(id, p.state);
+  if (reason) {
+    const heard = last?.transcript;
+    update(s => {
+      s.courts[id - 1].decision = { type: 'blocked', title: 'Call blocked', detail: 'CourtGuard rejected the call (' + reason + '). Score unchanged.', ...(heard !== undefined ? { heard } : {}) };
+    });
+  }
 }
 export function applyTournamentUpdate(p: { matches: Record<string, MatchState> }) {
   for (const c of state.courts) {
