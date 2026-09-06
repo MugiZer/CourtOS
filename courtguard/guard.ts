@@ -1,16 +1,27 @@
-// B02 CourtGuard core — deterministic scoring firewall (singles scope, generic point math).
+// B02 CourtGuard core + B04 doubles/tiebreak rotation — deterministic scoring firewall.
 // Authority: architecture.md §§6,8 + shared/types.ts (frozen contract, mirrored only).
 // No LLM, no deps, numeric counters only (never display strings as state).
-// Erasable-syntax TS so `node --test` loads it directly. No tiebreak serve
-// rotation here (B04 owns doubles/TB rotation); singles serve just alternates.
+// Erasable-syntax TS so `node --test` loads it directly. All game/set/TB
+// verdicts come from the CompiledRuleset (single authority); rotation.ts owns
+// only the who-serves-next math the compiler does not.
 import type {
   CompiledRuleset,
   MatchState,
+  PlayerId,
   RulesetDefinition,
   TeamId,
   TennisIntent,
 } from "../shared/types.ts";
 import { compileRuleset } from "./rules/compiler.ts";
+import {
+  advanceGameService,
+  advanceTiebreakService,
+  enterTiebreakService,
+  exitTiebreakService,
+  expectedReceiver,
+  resyncTiebreakService,
+  tbFirstTeam,
+} from "./rotation.ts";
 
 export type GuardResult =
   | { accepted: true; state: MatchState }
@@ -39,7 +50,6 @@ const STANDARD_SINGLES: RulesetDefinition = {
 const STANDARD_POLICY: CompiledRuleset = compileRuleset(STANDARD_SINGLES);
 
 const idx = (t: TeamId): number => (t === "A" ? 0 : 1);
-const other = (t: TeamId): TeamId => (t === "A" ? "B" : "A");
 
 // One scoring authority (arch §26 rule 3): every game/set/tiebreak/match
 // verdict below comes from the compiled policy. Guard only books state
@@ -53,27 +63,13 @@ function policyOf(rules: RulesInput): CompiledRuleset {
   return compileRuleset(def);
 }
 
-// Singles alternation: the other player serves next, receives accordingly.
-function flipService(s: MatchState): MatchState["service"] {
-  const server = s.service.serviceOrder.find((p) => p !== s.service.server) ?? s.service.server;
-  const receiver = s.service.serviceOrder.find((p) => p !== server) ?? s.service.receivingTeam;
-  return {
-    ...s.service,
-    servingTeam: other(s.service.servingTeam),
-    server,
-    receivingTeam: other(s.service.receivingTeam),
-    deuceReceiver: receiver,
-    adReceiver: receiver,
-  };
-}
-
 function winGame(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
   const games = [s.games[0], s.games[1]] as [number, number];
   games[idx(winner)] += 1;
   const probe = { ...s, games };
   if (policy.shouldStartTiebreak(probe)) {
     const base = { ...s, serverPoints: 0, receiverPoints: 0, games, inTiebreak: true };
-    return { ...base, service: flipService(base) };
+    return { ...base, service: enterTiebreakService(s.service) };
   }
   if (policy.setWinner(probe) !== null) {
     const sets = [...s.sets, games];
@@ -92,12 +88,12 @@ function winGame(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchS
     // distinct phase — never a third set.
     if (policy.shouldStartMatchTiebreak(base)) {
       const mtb = { ...base, inTiebreak: true };
-      return { ...mtb, service: flipService(mtb) };
+      return { ...mtb, service: enterTiebreakService(s.service) };
     }
-    return { ...base, service: flipService(base) };
+    return { ...base, service: advanceGameService(s.service) };
   }
   const base = { ...s, serverPoints: 0, receiverPoints: 0, games };
-  return { ...base, service: flipService(base) };
+  return { ...base, service: advanceGameService(s.service) };
 }
 
 function winTiebreak(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
@@ -116,17 +112,37 @@ function winTiebreak(s: MatchState, winner: TeamId, policy: CompiledRuleset): Ma
   if (policy.nextPhase(base) === "COMPLETE") {
     return { ...base, phase: "COMPLETE", winner };
   }
-  return { ...base, service: flipService(base) };
+  // Post-TB restore (ITF order): resume one rotation step after the TB's
+  // first server. s.service still describes the final TB point, so invert
+  // from its 0-based index (points played - 1). Legacy frozen seeds (no
+  // tiebreakPointNumber) exit via the plain game advance, as before.
+  if (s.service.tiebreakPointNumber === undefined) {
+    return { ...base, service: advanceGameService(s.service) };
+  }
+  const lastPoint = s.serverPoints + s.receiverPoints - 1;
+  return { ...base, service: exitTiebreakService(s.service, lastPoint) };
 }
 
 function applyPoint(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
-  const serverWon = winner === s.service.servingTeam;
+  // Scoring reference: the game server — or, inside a tiebreak, the stable
+  // TB-first-serving team (rotation.ts). A TB WITHOUT tiebreakPointNumber is
+  // a legacy/frozen mid-TB seed (B02): service stays frozen and scores map via
+  // the frozen team, exactly as before rotation existed.
+  const tracked = s.inTiebreak && s.service.tiebreakPointNumber !== undefined;
+  const ref = tracked
+    ? tbFirstTeam(s.service, s.serverPoints + s.receiverPoints)
+    : s.service.servingTeam;
+  const serverWon = winner === ref;
   const serverPoints = s.serverPoints + (serverWon ? 1 : 0);
   const receiverPoints = s.receiverPoints + (serverWon ? 0 : 1);
   const next = { ...s, serverPoints, receiverPoints };
   if (s.inTiebreak) {
     if (policy.tiebreakWinner(next) !== null) return winTiebreak(next, winner, policy);
-    return next;
+    if (!tracked) return next;
+    // TB service describes the upcoming point: derive it from the rotation +
+    // tiebreak point number (points played so far), never ad-hoc UI state.
+    const played = next.serverPoints + next.receiverPoints;
+    return { ...next, service: advanceTiebreakService(next.service, played) };
   }
   if (policy.gameWinner(next) !== null) return winGame(next, winner, policy);
   return next;
@@ -158,6 +174,17 @@ export function transition(state: MatchState, intent: TennisIntent, rules?: Rule
   switch (intent.type) {
     case "POINT_WON": {
       if (intent.winner !== "A" && intent.winner !== "B") return reject(state, "INVALID_INTENT");
+      // B04 rotation firewall: an optional server/receiver claim on the intent
+      // (voice/touch knows who served) is checked against the engine's expected
+      // server for the upcoming point. Absent claim = no check (back-compat).
+      const claim = intent as { winner: TeamId; server?: PlayerId; receiver?: PlayerId };
+      if (claim.server !== undefined && claim.server !== state.service.server) {
+        return reject(state, `WRONG_SERVER: expected ${state.service.server}`);
+      }
+      if (claim.receiver !== undefined) {
+        const want = expectedReceiver(state.service, state.serverPoints, state.receiverPoints);
+        if (claim.receiver !== want) return reject(state, `WRONG_RECEIVER: expected ${want}`);
+      }
       return { accepted: true, state: applyPoint(state, intent.winner, policyOf(rules)) };
     }
     case "SCORE_CALL": {
@@ -174,9 +201,17 @@ export function transition(state: MatchState, intent: TennisIntent, rules?: Rule
           t.nextState.receiverPoints === p.receiverPoints,
       );
       // B02 spec: a score call resolves to exactly one POINT_WON — commit it
-      // through the same path, never the previewed state directly.
+      // through the same path, never the previewed state directly. Any
+      // server/receiver claim rides along so the rotation firewall still applies.
       if (hits.length === 1 && hits[0].intent.type === "POINT_WON") {
-        return transition(state, { type: "POINT_WON", winner: hits[0].intent.winner }, rules);
+        const heard = intent as { server?: PlayerId; receiver?: PlayerId };
+        const point: TennisIntent & { server?: PlayerId; receiver?: PlayerId } = {
+          type: "POINT_WON",
+          winner: hits[0].intent.winner,
+        };
+        if (heard.server !== undefined) point.server = heard.server;
+        if (heard.receiver !== undefined) point.receiver = heard.receiver;
+        return transition(state, point, rules);
       }
       if (hits.length > 1) return reject(state, "AMBIGUOUS_SCORE");
       return reject(state, "ILLEGAL_TRANSITION");
@@ -194,6 +229,10 @@ export function transition(state: MatchState, intent: TennisIntent, rules?: Rule
       ) {
         return reject(state, "INVALID_ROLLBACK");
       }
+      // A rollback inside a tracked TB resets the counters explicitly, so the
+      // rotation re-syncs to the target (otherwise it would drift silently).
+      const tracked =
+        state.inTiebreak && state.service.tiebreakPointNumber !== undefined;
       return {
         accepted: true,
         state: {
@@ -201,6 +240,15 @@ export function transition(state: MatchState, intent: TennisIntent, rules?: Rule
           serverPoints: t.serverPoints,
           receiverPoints: t.receiverPoints,
           phase: state.phase === "DISPUTE" ? "PLAYING" : state.phase,
+          ...(tracked
+            ? {
+                service: resyncTiebreakService(
+                  state.service,
+                  state.service.tiebreakPointNumber as number,
+                  t.serverPoints + t.receiverPoints,
+                ),
+              }
+            : {}),
         },
       };
     }
