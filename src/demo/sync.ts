@@ -1,10 +1,10 @@
-// Socket.IO sync for accepted court events — thin client over server/'s
-// protocol (court:event with ACK, court:sync batch flush). Dormant until
-// connect() is called, so the preview works standalone; offline keeps local
-// scoring. No dashboard listeners (follow-up).
+// Socket.IO sync for court events — thin client over server's protocol
+// (court:event with ACK, court:sync batch flush) plus organizer-dashboard
+// listeners (tournament/court/assignment/ruleset broadcasts route into the
+// store via subscribeDashboard). Dormant until connect() is called.
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
-import type { CourtId, MatchEventRecord, MatchId } from '../../shared/types.ts';
+import type { Assignment, CourtId, MatchEventRecord, MatchId, MatchState, RulesetDefinition, TournamentTwinSnapshot } from '../../shared/types.ts';
 
 let socket: Socket | null = null;
 
@@ -67,4 +67,32 @@ export function syncCourt(courtId: CourtId, matchId: MatchId, events: MatchEvent
   return withAck<SyncAck>((ack) => {
     s.emit('court:sync', { courtId, matchId, events }, ack);
   });
+}
+
+export interface CourtUpdate { courtId: CourtId; matchId: MatchId; events: MatchEventRecord[]; state: MatchState | null; reconcile: string | null; version: number }
+export interface AssignmentUpdate { assignments: Assignment[]; version: number }
+
+export function onCourtUpdate(cb: (p: CourtUpdate) => void): () => void {
+  if (!socket) return () => {};
+  const s: Socket = socket;
+  s.on('court:update', cb);
+  return () => { s.off('court:update', cb); };
+}
+export function onTournamentUpdate(cb: (p: TournamentTwinSnapshot) => void): () => void {
+  if (!socket) return () => {};
+  const s: Socket = socket;
+  s.on('tournament:update', cb);
+  return () => { s.off('tournament:update', cb); };
+}
+export function onAssignmentUpdate(cb: (p: AssignmentUpdate) => void): () => void {
+  if (!socket) return () => {};
+  const s: Socket = socket;
+  s.on('assignment:update', cb);
+  return () => { s.off('assignment:update', cb); };
+}
+export function onRulesetPublished(cb: (p: RulesetDefinition) => void): () => void {
+  if (!socket) return () => {};
+  const s: Socket = socket;
+  s.on('ruleset:published', cb);
+  return () => { s.off('ruleset:published', cb); };
 }
