@@ -4,7 +4,7 @@
 
 **Blocked by:** B05 (needs real `replay()` for reconcile; B01 protocol names via B05).
 
-**Status:** blocked
+**Status:** done (2200abe; audit GO with 2 non-blocking hardening notes: conflicting-duplicate silent drop [Byzantine-only], open-gap interim mirror [visible via ACK]; review clean)
 
 **Authority:** architecture.md §§3,4,11,12 (Socket.IO rooms per court; localStorage resilience; court authoritative for its scoring; no silent organizer mutation of offline courts — explicit reconcile state instead).
 

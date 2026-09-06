@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done (af1c653 + conformance fix; audit PARTIAL→fixed, code-review clean)
 
 **Authority:** architecture.md §§3,9,11,23 (flat `shared/` + `courtguard/` + `server/`, no `packages/` scaffolding).
 

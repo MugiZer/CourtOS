@@ -4,7 +4,7 @@
 
 **Blocked by:** B01 (shapes; pure `solve()` builds parallel — trigger-wiring verified after B06 lands).
 
-**Status:** blocked
+**Status:** done (in stabilize commit; tests green; trigger-wiring verified against B06 commitPlan seam; review clean)
 
 **Authority:** architecture.md §13 + ADR-010/011 (hard constraints inviolable; weighted objective; version-bound plans, stale discarded; optimizer never mutates Twin).
 

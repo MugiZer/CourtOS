@@ -4,7 +4,7 @@
 
 **Blocked by:** B01 (shapes frozen).
 
-**Status:** blocked
+**Status:** done (444b60c + review-fix 8def7ac; audit GO, review clean)
 
 **Authority:** architecture.md §§6,8 (primitive `POINT_WON(winner)`, numeric counters, `legalNextStates()` first-class, no LLM inside).
 

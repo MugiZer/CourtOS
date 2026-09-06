@@ -4,7 +4,7 @@
 
 **Blocked by:** B02 (edits the same `transition`/`state` files — genuinely sequential).
 
-**Status:** blocked
+**Status:** done (d2bd3a4; audit GO, review clean — 1 advisory: scoring input depends on rotation inversion, same-owner allowed)
 
 **Authority:** architecture.md §8 (rotation derived from point number + order, never ad-hoc UI state).
 

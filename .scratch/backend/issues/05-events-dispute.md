@@ -4,7 +4,7 @@
 
 **Blocked by:** B01 (shapes; runs parallel with B02 — `replay` uses `transition` as a black box, final proof needs B02's DISPUTE guard).
 
-**Status:** blocked
+**Status:** done (in B08-labeled commit + review-fix 8def7ac; audit GO, review clean)
 
 **Authority:** architecture.md §§9,10 + ADR-005/009 (history never deleted; organizer answers "what score do we return to?").
 

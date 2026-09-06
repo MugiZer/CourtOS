@@ -4,7 +4,7 @@
 
 **Blocked by:** B01 (shapes frozen; runs parallel with B02, both conform to B01's `CompiledRuleset`).
 
-**Status:** blocked
+**Status:** done (72749e9 + review-fix 8def7ac; audit GO, review clean)
 
 **Authority:** architecture.md §§7,15 + ADR-007/008 (compiler validates config; started matches pin version; scoring changes apply to upcoming matches only).
 

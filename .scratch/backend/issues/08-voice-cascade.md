@@ -4,7 +4,7 @@
 
 **Blocked by:** B01 (shapes; runs parallel with B02 — ranking consumes `legalNextStates` signature as a black box).
 
-**Status:** blocked
+**Status:** done (in B08 commit + honesty rework 8def7ac; review clean; live-mic proof is demo-day)
 
 **Authority:** architecture.md §5 + ADR-002/003/004 (same-buffer fallback, state-constrained ranking, tactile shares `transition()`; no cross-provider score averaging, no calibration tuning).
 
