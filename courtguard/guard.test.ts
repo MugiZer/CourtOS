@@ -41,12 +41,12 @@ const stdDef = (over: object = {}): RulesetDefinition => ({
   decidingSet: { kind: "NORMAL_SET" },
   ...over,
 });
-const NO_AD = stdDef({ game: { scoring: "NO_AD" } });
-const TB10 = stdDef({
+const NO_AD: CompiledRuleset = compileRuleset(stdDef({ game: { scoring: "NO_AD" } }));
+const TB10: CompiledRuleset = compileRuleset(stdDef({
   set: { gamesToWin: 6, winByGames: 2, tiebreak: { atGames: [6, 6], pointsToWin: 10, winByPoints: 2 } },
-});
+}));
 
-const point = (s: MatchState, w: TeamId, rules?: RulesetDefinition | CompiledRuleset) =>
+const point = (s: MatchState, w: TeamId, rules?: CompiledRuleset) =>
   transition(s, { type: "POINT_WON", winner: w }, rules);
 
 describe("voice table: 30-15 hears a resulting score", () => {
@@ -357,11 +357,12 @@ describe("SCORE_CALL resolves to POINT_WON (B02 spec)", () => {
 });
 
 describe("deciding match tiebreak honors the compiled policy (F1/F3)", () => {
-  const MTB = stdDef({
+  const MTB_DEF = stdDef({
     set: { gamesToWin: 6, winByGames: 2, tiebreak: { atGames: [6, 6], pointsToWin: 7, winByPoints: 2 } },
     decidingSet: { kind: "MATCH_TIEBREAK", pointsToWin: 10, winByPoints: 2 },
   });
-  const COMPILED: CompiledRuleset = compileRuleset(structuredClone(MTB));
+  const MTB: CompiledRuleset = compileRuleset(structuredClone(MTB_DEF));
+  const COMPILED: CompiledRuleset = compileRuleset(structuredClone(MTB_DEF));
   const SPLIT: Array<[number, number]> = [[6, 4], [4, 6]];
   const mtb = (sp: number, rp: number): MatchState =>
     singles({ games: [0, 0], sets: structuredClone(SPLIT), inTiebreak: true, serverPoints: sp, receiverPoints: rp });
@@ -375,7 +376,7 @@ describe("deciding match tiebreak honors the compiled policy (F1/F3)", () => {
   ];
   for (const [name, sp, rp, w, over] of rows) {
     it(`MTB ${name}`, () => {
-      const kinds = [["definition", MTB], ["compiled", COMPILED]] as const;
+      const kinds = [["compiled-a", MTB], ["compiled-b", COMPILED]] as const;
       for (const [kind, rules] of kinds) {
         const r = point(mtb(sp, rp), w, rules);
         assert.equal(r.accepted, true, `${name} (${kind})`);
@@ -390,7 +391,7 @@ describe("deciding match tiebreak honors the compiled policy (F1/F3)", () => {
       }
     });
   }
-  it("compiled ruleset and definition inputs agree (decidingSet honored)", () => {
+  it("separately compiled rulesets agree (decidingSet honored)", () => {
     const s = mtb(9, 9);
     const a = point(s, "A", MTB);
     const b = point(structuredClone(s), "A", COMPILED);

@@ -8,11 +8,11 @@ import type {
   CompiledRuleset,
   MatchState,
   PlayerId,
-  RulesetDefinition,
   TeamId,
   TennisIntent,
 } from "../shared/types.ts";
 import { compileRuleset } from "./rules/compiler.ts";
+import { standardSingles } from "./rules/presets.ts";
 import {
   advanceGameService,
   advanceTiebreakService,
@@ -32,36 +32,16 @@ export interface LegalTransition {
   nextState: MatchState;
 }
 
-// B03 passes a CompiledRuleset; tests/fixtures pass a definition or nothing.
-export type RulesInput = CompiledRuleset | RulesetDefinition | undefined;
-
-const STANDARD_SINGLES: RulesetDefinition = {
-  id: "standard-singles",
-  version: 1,
-  participants: { mode: "SINGLES" },
-  game: { scoring: "ADVANTAGE" },
-  set: {
-    gamesToWin: 6,
-    winByGames: 2,
-    tiebreak: { atGames: [6, 6], pointsToWin: 7, winByPoints: 2 },
-  },
-  decidingSet: { kind: "NORMAL_SET" },
-};
-const STANDARD_POLICY: CompiledRuleset = compileRuleset(STANDARD_SINGLES);
+// Callers pass a CompiledRuleset (compileRuleset at setup); omitted rules use
+// the standard-singles preset, compiled ONCE here — never per point.
+const DEFAULT_POLICY: CompiledRuleset = compileRuleset(standardSingles);
 
 const idx = (t: TeamId): number => (t === "A" ? 0 : 1);
 
 // One scoring authority (arch §26 rule 3): every game/set/tiebreak/match
 // verdict below comes from the compiled policy. Guard only books state
 // (points/games/sets/service/phase) around those verdicts.
-function policyOf(rules: RulesInput): CompiledRuleset {
-  if (rules === undefined) return STANDARD_POLICY;
-  if (typeof (rules as CompiledRuleset).gameWinner === "function")
-    return rules as CompiledRuleset; // full policy honored, incl. decidingSet
-  const def = (rules as { definition?: RulesetDefinition }).definition ??
-    (rules as RulesetDefinition);
-  return compileRuleset(def);
-}
+const policyOf = (rules?: CompiledRuleset): CompiledRuleset => rules ?? DEFAULT_POLICY;
 
 function winGame(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
   const games = [s.games[0], s.games[1]] as [number, number];
@@ -150,7 +130,7 @@ function applyPoint(s: MatchState, winner: TeamId, policy: CompiledRuleset): Mat
 
 // First-class API: every legal point outcome from here (powers transition,
 // voice ranking, tactile controls). Empty when no point can be played.
-export function legalNextStates(state: MatchState, rules?: RulesInput): LegalTransition[] {
+export function legalNextStates(state: MatchState, rules?: CompiledRuleset): LegalTransition[] {
   const policy = policyOf(rules);
   if (policy.legalEvents(state).length === 0) return [];
   return (["A", "B"] as TeamId[]).map((winner) => ({
@@ -165,7 +145,7 @@ const reject = (state: MatchState, reason: string): GuardResult => ({
   state,
 });
 
-export function transition(state: MatchState, intent: TennisIntent, rules?: RulesInput): GuardResult {
+export function transition(state: MatchState, intent: TennisIntent, rules?: CompiledRuleset): GuardResult {
   if (state.phase === "COMPLETE") return reject(state, "MATCH_COMPLETE");
   // DISPUTE rule (specced in shared/types.ts): ONLY SCORE_ROLLBACK resolves.
   if (state.phase === "DISPUTE" && intent.type !== "SCORE_ROLLBACK") {

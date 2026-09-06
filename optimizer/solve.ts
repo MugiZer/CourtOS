@@ -114,10 +114,8 @@ function permutations(arr: string[]): string[][] {
 }
 
 interface Sim {
-  order: string[];
   courtOf: Record<string, string>;
   starts: Record<string, number>;
-  ends: Record<string, number>;
   makespan: number;
 }
 
@@ -133,7 +131,6 @@ function simulate(
   const playerFree: Record<string, number> = { ...playerFreeInit };
   const courtOf: Record<string, string> = {};
   const starts: Record<string, number> = {};
-  const ends: Record<string, number> = {};
   let makespan = 0;
   for (const c of courts) makespan = Math.max(makespan, courtFreeInit[c] ?? 0);
   for (let k = 0; k < order.length; k++) {
@@ -145,12 +142,11 @@ function simulate(
     const e = s + EST_MATCH_MS;
     courtOf[m] = c;
     starts[m] = s;
-    ends[m] = e;
     courtFree[c] = e;
     for (const p of parts) playerFree[p] = e;
     makespan = Math.max(makespan, e);
   }
-  return { order: order.slice(), courtOf, starts, ends, makespan };
+  return { courtOf, starts, makespan };
 }
 
 export function solve(twin: TournamentTwinSnapshot, opts?: SolveOptions): AssignmentPlan {
@@ -209,24 +205,24 @@ export function solve(twin: TournamentTwinSnapshot, opts?: SolveOptions): Assign
     if (a.status !== "PLAYING") oldByMatch.set(a.matchId, { courtId: a.courtId, status: a.status });
   }
 
-  let best: Sim | null = null;
+  let bestMakespan = now;
   let bestTotal = Infinity;
   let bestBreakdown = { makespan: 0, wait: 0, idle: 0, churn: 0, total: 0 };
   let bestCommit: Assignment[] = [];
 
-  const score = (sim: Sim): { total: number; bd: typeof bestBreakdown; commit: Assignment[] } => {
+  const score = (sim: Sim, order: string[]): { total: number; bd: typeof bestBreakdown; commit: Assignment[] } => {
     const makespanMin = (sim.makespan - now) / MIN;
     let waitMin = 0;
-    for (const m of sim.order) waitMin += (sim.starts[m] - now) / MIN;
+    for (const m of order) waitMin += (sim.starts[m] - now) / MIN;
     const busyPerCourt: Record<string, number> = {};
     for (const c of freeCourts) busyPerCourt[c] = (courtFreeInit[c] ?? now) - now;
-    for (const m of sim.order) busyPerCourt[sim.courtOf[m]] += EST_MATCH_MS;
+    for (const m of order) busyPerCourt[sim.courtOf[m]] += EST_MATCH_MS;
     let idleMin = 0;
     for (const c of freeCourts) idleMin += Math.max(0, sim.makespan - now - busyPerCourt[c]) / MIN;
     // Commit = first match per free court, conflict-free prefix (pairwise player-
     // disjoint + disjoint from live). Deferred matches stay projected, next horizon.
     const firstPerCourt = new Map<string, string>();
-    for (const m of sim.order) {
+    for (const m of order) {
       const c = sim.courtOf[m];
       if (!firstPerCourt.has(c)) firstPerCourt.set(c, m);
     }
@@ -262,10 +258,10 @@ export function solve(twin: TournamentTwinSnapshot, opts?: SolveOptions): Assign
     for (const perm of permutations(candidates)) {
       for (let choice = 0; choice < nCourtsPow; choice++) {
         const sim = simulate(perm, freeCourts, choice, courtFreeInit, playerFreeInit, matches);
-        const { total, bd, commit } = score(sim);
+        const { total, bd, commit } = score(sim, perm);
         if (total < bestTotal) {
           bestTotal = total;
-          best = sim;
+          bestMakespan = sim.makespan;
           bestBreakdown = bd;
           bestCommit = commit;
         }
@@ -275,13 +271,13 @@ export function solve(twin: TournamentTwinSnapshot, opts?: SolveOptions): Assign
     const makespan = Math.max(now, ...Object.values(courtFreeInit));
     const mm = (makespan - now) / MIN;
     bestBreakdown = { makespan: round2(mm), wait: 0, idle: 0, churn: 0, total: round2(mm) };
-    best = { order: [], courtOf: {}, starts: {}, ends: {}, makespan };
+    bestMakespan = makespan;
   }
 
   const plan: AssignmentPlan = {
     basedOnStateVersion: twin.version,
     assignments: [...pinned, ...bestCommit],
-    projectedFinishTime: best?.makespan ?? now,
+    projectedFinishTime: bestMakespan,
     objectiveBreakdown: bestBreakdown,
   };
   return plan;

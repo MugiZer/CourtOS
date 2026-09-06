@@ -22,22 +22,22 @@ function mkState(o: Partial<MatchState> = {}): MatchState {
   };
 }
 
-// Minimal stub of B02's frozen signature — point math + DISPUTE freeze only.
-function stubTransition(state: MatchState, intent: TennisIntent, _rules: CompiledRuleset) {
+// Minimal stub of B02's frozen shape — point math + DISPUTE freeze only.
+function stubTransition(state: MatchState, intent: TennisIntent, _rules?: CompiledRuleset) {
   if (state.phase === "DISPUTE" && intent.type !== "SCORE_ROLLBACK")
-    return { decision: "REJECTED" as const, rejectionReason: "DISPUTE_FROZEN", resultingState: state };
+    return { accepted: false as const, reason: "DISPUTE_FROZEN", state };
   switch (intent.type) {
     case "POINT_WON": {
       const s = { ...state };
       if (intent.winner === state.service.servingTeam) s.serverPoints += 1; else s.receiverPoints += 1;
-      return { decision: "ACCEPTED" as const, resultingState: s };
+      return { accepted: true as const, state: s };
     }
     case "DISPUTE_START":
-      return { decision: "ACCEPTED" as const, resultingState: { ...state, phase: "DISPUTE" as const } };
+      return { accepted: true as const, state: { ...state, phase: "DISPUTE" as const } };
     case "SCORE_ROLLBACK":
-      return { decision: "ACCEPTED" as const, resultingState: { ...state, serverPoints: intent.to.serverPoints, receiverPoints: intent.to.receiverPoints, phase: "PLAYING" as const } };
+      return { accepted: true as const, state: { ...state, serverPoints: intent.to.serverPoints, receiverPoints: intent.to.receiverPoints, phase: "PLAYING" as const } };
     default:
-      return { decision: "REJECTED" as const, rejectionReason: "ILLEGAL_TRANSITION", resultingState: state };
+      return { accepted: false as const, reason: "ILLEGAL_TRANSITION", state };
   }
 }
 
@@ -47,9 +47,9 @@ function drive(log: MatchEventRecord[], intent: TennisIntent, source: "VOICE" | 
   const r = stubTransition(prev, intent, RULES);
   return appendEvent(log, {
     courtId: prev.courtId, matchId: prev.matchId, source, proposedIntent: intent,
-    previousState: prev, decision: r.decision,
-    ...(r.rejectionReason ? { rejectionReason: r.rejectionReason } : {}),
-    resultingState: r.resultingState, timestamp: (ts += 1000),
+    previousState: prev, decision: r.accepted ? "ACCEPTED" : "REJECTED",
+    ...(!r.accepted && r.reason ? { rejectionReason: r.reason } : {}),
+    resultingState: r.state, timestamp: (ts += 1000),
   });
 }
 

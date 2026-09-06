@@ -18,23 +18,11 @@ import type {
 
 // Frozen B02 signature per architecture.md §6 + shared/types.ts spec comment:
 // transition(state, intent, rules) -> accepted (+ new state) or rejected (+ reason).
-// B02's landed return shape ({ accepted, state, reason }) is accepted alongside
-// the spec sketch ({ decision, resultingState, rejectionReason }) — normalized below.
-export type TransitionResult = {
-  decision: EventDecision;
-  resultingState: MatchState;
-  rejectionReason?: string;
-};
-export type GuardLikeResult = {
-  accepted: boolean;
-  state: MatchState;
-  reason?: string;
-};
 export type TransitionFn = (
   state: MatchState,
   intent: TennisIntent,
   rules?: CompiledRuleset,
-) => TransitionResult | GuardLikeResult;
+) => { accepted: boolean; state: MatchState; reason?: string };
 
 export interface AppendInit {
   courtId: string;
@@ -90,8 +78,8 @@ export function replay(
   if (transition) {
     for (const e of ordered) {
       const r = transition(e.previousState, e.proposedIntent as TennisIntent, rules);
-      assert.equal(outDecision(r), e.decision, `replay: decision diverged at sequence ${e.sequence}`);
-      assert.deepStrictEqual(outState(r), e.resultingState, `replay: state diverged at sequence ${e.sequence}`);
+      assert.equal(r.accepted ? "ACCEPTED" : "REJECTED", e.decision, `replay: decision diverged at sequence ${e.sequence}`);
+      assert.deepStrictEqual(r.state, e.resultingState, `replay: state diverged at sequence ${e.sequence}`);
     }
   }
   return ordered[ordered.length - 1].resultingState;
@@ -130,29 +118,15 @@ export function resolveDispute(
   if (!seen) throw new Error("resolveDispute: target score not in match history");
   const intent: TennisIntent = { type: "SCORE_ROLLBACK", to: args.to };
   const r = args.transition(frozen, intent, args.rules);
-  const reason = outReason(r);
   return appendEvent(log, {
     courtId: frozen.courtId,
     matchId: args.matchId,
     source: args.source ?? "ORGANIZER",
     proposedIntent: intent,
     previousState: frozen,
-    decision: outDecision(r),
-    ...(reason !== undefined ? { rejectionReason: reason } : {}),
-    resultingState: outState(r),
+    decision: r.accepted ? "ACCEPTED" : "REJECTED",
+    ...(r.reason !== undefined ? { rejectionReason: r.reason } : {}),
+    resultingState: r.state,
     ...(args.timestamp !== undefined ? { timestamp: args.timestamp } : {}),
   });
-}
-
-// Normalizers tolerate B02's exact return key — decided when B02 lands.
-function outDecision(r: TransitionResult | GuardLikeResult): EventDecision {
-  return (r as TransitionResult).decision ?? ((r as GuardLikeResult).accepted ? "ACCEPTED" : "REJECTED");
-}
-function outReason(r: TransitionResult | GuardLikeResult): string | undefined {
-  return (r as TransitionResult).rejectionReason ?? (r as GuardLikeResult).reason;
-}
-function outState(r: TransitionResult | GuardLikeResult): MatchState {
-  const s = r.resultingState ?? (r as unknown as { state?: MatchState }).state;
-  if (!s) throw new Error("transition returned no resulting state");
-  return s;
 }

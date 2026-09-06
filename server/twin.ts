@@ -198,19 +198,25 @@ export function changeoverStatus(info: ChangeoverInfo, now: number = Date.now())
   };
 }
 
+// One Map→Record copy: clone=true shallow-copies values (courts/players/
+// assignments), clone=false keeps references (matches/rulesets/connectivity)
+// — identical to the seven hand-rolled loops this replaces.
+function toRecord(map: Map<string, any>, clone = false): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of map) out[k] = clone ? { ...v } : v;
+  return out;
+}
+
 // §12 JSON-friendly snapshot (Records, not Maps) for tournament:update.
 export function snapshot(twin: Twin): TournamentTwinSnapshot {
-  const courts: TournamentTwinSnapshot["courts"] = {};
-  for (const [k, v] of twin.courts) courts[k] = { ...v };
-  const matches: TournamentTwinSnapshot["matches"] = {};
-  for (const [k, v] of twin.matches) matches[k] = v;
-  const players: TournamentTwinSnapshot["players"] = {};
-  for (const [k, v] of twin.players) players[k] = { ...v };
-  const assignments: TournamentTwinSnapshot["assignments"] = {};
-  for (const [k, v] of twin.assignments) assignments[k] = { ...v };
-  const rulesets: TournamentTwinSnapshot["rulesets"] = {};
-  for (const [k, v] of twin.rulesets) rulesets[k] = v;
-  const connectivity: TournamentTwinSnapshot["connectivity"] = {};
-  for (const [k, v] of twin.connectivity) connectivity[k] = v;
-  return { version: twin.version, courts, matches, players, assignments, rulesets, connectivity, sponsor: { ...twin.sponsor } };
+  return {
+    version: twin.version,
+    courts: toRecord(twin.courts, true),
+    matches: toRecord(twin.matches),
+    players: toRecord(twin.players, true),
+    assignments: toRecord(twin.assignments, true),
+    rulesets: toRecord(twin.rulesets),
+    connectivity: toRecord(twin.connectivity),
+    sponsor: { ...twin.sponsor },
+  };
 }

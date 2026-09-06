@@ -4,7 +4,7 @@
 // never guess between two legal candidates. CourtGuard owns state; this module
 // only proposes typed intents (ADR-001).
 import type { CanonicalScore, MatchState, TeamId, TennisIntent } from "../shared/types.ts";
-import { createBrowserSpeechPrimary, parseUtterance, segments, type ASRProvider, type ASRResult } from "./providers.ts";
+import { createBrowserSpeechPrimary, pcmPresence, type ASRProvider, type ASRResult } from "./providers.ts";
 
 // Fixed gates — not tuned per provider (ticket constraint).
 export const STRONG = 0.75; // clear primary + legal + clear margin -> CourtGuard
@@ -112,12 +112,12 @@ export async function interpretScoreCall(args: {
   const reject = (reason: string, trace: Partial<VoiceTrace> = {}): VoiceInterpretation =>
     ({ outcome: "REJECT", intent: null, reason, trace: { ...blank, ...trace, outcome: "REJECT", reason } });
 
-  // Capture/VAD/wake/buffer gates (adjacent-court defense layers 1-3).
-  try {
-    const parsed = parseUtterance(args.audio);
-    if (parsed.seconds < 2 || parsed.seconds > 4) return reject("BAD_WINDOW", { reason: "BAD_WINDOW" });
-    if (segments(parsed.samples).length === 0) return reject("NO_SPEECH", { reason: "NO_SPEECH" });
-  } catch { return reject("BAD_WINDOW", { reason: "BAD_WINDOW" }); }
+  // Presence/energy gate on the raw input (no custom container): malformed
+  // or out-of-window bytes, or silence, reject before any provider cost.
+  const presence = pcmPresence(args.audio);
+  if (!presence || presence.seconds < 2 || presence.seconds > 4)
+    return reject("BAD_WINDOW", { reason: "BAD_WINDOW" });
+  if (!presence.voiced) return reject("NO_SPEECH", { reason: "NO_SPEECH" });
 
   const p = await primary.transcribe(args.audio); // SAME buffered audio throughout
   if (!p.wake) return reject("NO_WAKE", { primaryTranscript: p.transcript, reason: "NO_WAKE" });
