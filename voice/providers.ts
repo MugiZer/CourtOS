@@ -1,13 +1,16 @@
-// B08 voice providers — REAL offline ASR adapters (live-mic is demo-day).
+// B08 voice providers — honest wiring.
 //
-// Primary: tablet Web-Speech-grammar decoder — tiny-vocab grammar, fragile
-//   zero-crossing estimator with no smoothing (honest cascade trigger in noise).
-// Fallback: Whisper-class robust decoder — median-smoothed estimator on the
-//   SAME bytes (noise-robust, higher latency; conditional-only per ADR-002).
-//
-// Tests feed raw PCM bytes through transcribe(); nothing bypasses this path.
-// Canned audio is synthesized PCM (sine word-segments + deterministic noise),
-// decoded by genuinely different algorithms per provider — not a mock lookup.
+// PRODUCTION primary: the real browser Web Speech API (SpeechRecognition /
+//   webkitSpeechRecognition with a tiny-vocab JSGF grammar), built by
+//   createBrowserSpeechPrimary(). It consumes the live microphone, not byte
+//   buffers, and cannot even be constructed without a browser (null there).
+// PRODUCTION fallback: server-side Whisper-class transcription behind
+//   createWhisperFallback(), which needs an API key and real network. It is an
+//   interface only in this offline-first client build — never faked.
+// TEST SEAM ONLY: everything below marked TEST SEAM (canned sine-tone PCM
+//   synthesis + deterministic DSP estimators) exists to exercise OUR logic —
+//   ranking/fusion in cascade.ts — in Node tests. It is not a real provider
+//   and must never be labelled, shipped, or default-wired as one.
 
 export const SAMPLE_RATE = 16000;
 const MAGIC = "CTOS";
@@ -60,7 +63,8 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-// ---- canned PCM synthesis (test + demo-day fixture source) ----
+// ---- TEST SEAM ONLY: canned PCM synthesis (ranking/fusion fixture source) ----
+// Not a microphone, not a provider — deterministic bytes for tests.
 
 export function encodeUtterance(
   words: string[],
@@ -93,7 +97,7 @@ export function encodeUtterance(
   return out;
 }
 
-// ---- real decode path (shared framing, per-provider estimators) ----
+// ---- shared framing (buffer/VAD gates; cascade.ts uses these on any input) ----
 
 export function parseUtterance(audio: Uint8Array): { samples: Int16Array; seconds: number } {
   if (
@@ -131,6 +135,8 @@ export function segments(samples: Int16Array): Int16Array[] {
   return segs;
 }
 
+// TEST SEAM ONLY estimators (frequency of a canned sine segment) — the live
+// production path above never touches these.
 export function zcFreq(seg: Int16Array): number {
   // Voiced-region estimate: skip leading/trailing near-silence (VAD hangover).
   let lo = 0;
@@ -159,6 +165,91 @@ function medianFilter(seg: Int16Array, k = 5): Int16Array {
   return out;
 }
 
+// ---- PRODUCTION primary: the real browser Web Speech API ----
+// Tiny-vocab JSGF grammar built from the same vocabulary below. Consumes the
+// LIVE MICROPHONE, not byte buffers (buffered PCM exists only for the TEST
+// SEAM further down and is ignored here). Cannot even be constructed without
+// a browser: no window, or no SpeechRecognition/webkitSpeechRecognition,
+// returns null — said plainly, never papered over with synthesis.
+export function createBrowserSpeechPrimary(opts: { lang?: string; wakeWord?: string } = {}): ASRProvider | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as Record<string, any>;
+  const SR = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+  if (typeof SR !== "function") return null;
+  const wakeWord = opts.wakeWord ?? "court";
+  const grammar =
+    `#JSGF V1.0; grammar tennis; public <call> = ${wakeWord} | ${Object.keys(WORD_FREQS).join(" | ")};`;
+  return {
+    name: "web-speech-live",
+    transcribe: (_audio) =>
+      new Promise<ASRResult>((resolve, reject) => {
+        const rec = new SR();
+        try {
+          if (typeof w.SpeechGrammarList === "function") {
+            const list = new w.SpeechGrammarList();
+            list.addFromString(grammar, 1);
+            rec.grammars = list;
+          }
+        } catch { /* grammar hint is optional */ }
+        rec.lang = opts.lang ?? "en-US";
+        rec.interimResults = false;
+        rec.maxAlternatives = 2;
+        rec.onresult = (ev: any) => {
+          const alts = Array.from((ev.results[0] ?? []) as ArrayLike<{ transcript: string; confidence: number }>);
+          const top = alts[0];
+          const done = (r: Omit<ASRResult, "provider">): void =>
+            resolve({ ...r, provider: "web-speech-live" });
+          if (!top) return done({ transcript: "", words: [], confidence: 0, nbest: [], usable: false, wake: false });
+          const tokens = top.transcript.trim().toLowerCase().split(/\s+/);
+          const wake = tokens[0] === wakeWord;
+          const words = (wake ? tokens.slice(1) : tokens).map((t) => (t in WORD_FREQS ? t : null));
+          const conf = typeof top.confidence === "number" ? top.confidence : 0;
+          const usable = words.length > 0 && words.every((x) => x !== null);
+          done({
+            transcript: (words.filter(Boolean) as string[]).join(" "),
+            words,
+            confidence: conf,
+            nbest: words.map((wd) => (wd === null ? [] : [{ word: wd, confidence: conf }])),
+            usable,
+            wake,
+          });
+        };
+        rec.onerror = (ev: any) => reject(new Error(`web-speech-live: ${ev?.error ?? "recognition error"}`));
+        try {
+          rec.start();
+        } catch (e) {
+          reject(e);
+        }
+      }),
+  };
+}
+
+// ---- PRODUCTION fallback: server-side Whisper-class transcription ----
+// Interface only in this offline-first client build: it needs an API key and
+// real network, so without a key the factory refuses — transcription is never
+// faked locally. The authenticated upload lives in transcribe once wired.
+export interface WhisperFallbackConfig {
+  apiKey: string;
+  endpoint?: string;
+}
+export function createWhisperFallback(config: WhisperFallbackConfig): ASRProvider {
+  if (!config || typeof config.apiKey !== "string" || config.apiKey.length === 0)
+    throw new Error("createWhisperFallback: server-side Whisper needs an API key; refusing to fake transcription");
+  const endpoint = config.endpoint ?? "https://api.openai.com/v1/audio/transcriptions";
+  return {
+    name: "whisper-server",
+    transcribe: async (_audio) => {
+      throw new Error(
+        `whisper-server: server round-trip not wired in this build (endpoint ${endpoint}); refusing to fake transcription`,
+      );
+    },
+  };
+}
+
+// ---- TEST SEAM ONLY: canned-output stand-ins for cascade tests ----
+// Same bytes in, genuinely different estimators out (fragile zero-crossing vs
+// median-smoothed) — enough to exercise ranking/fusion. NOT real providers:
+// never default-wire these into interpretScoreCall or ship them as ASR.
 async function transcribeWith(audio: Uint8Array, smooth: boolean, name: string, base: number, scale: number): Promise<ASRResult> {
   const fail = (wake = false): ASRResult => ({ provider: name, transcript: "", words: [], confidence: 0, nbest: [], usable: false, wake });
   let samples: Int16Array;
@@ -194,14 +285,14 @@ async function transcribeWith(audio: Uint8Array, smooth: boolean, name: string, 
   return { provider: name, transcript, words, nbest, confidence: usable ? Math.max(0, conf) : Math.max(0, conf) * 0.5, usable, wake };
 }
 
-// Primary: tablet Web-Speech grammar decoder (fragile estimator, no smoothing).
-export const WebSpeechPrimary: ASRProvider = {
-  name: "web-speech-grammar",
-  transcribe: (audio) => transcribeWith(audio, false, "web-speech-grammar", 0.92, 150),
+// TEST SEAM ONLY: fragile estimator (no smoothing) — trips the cascade in noise.
+export const SynthSeamPrimary: ASRProvider = {
+  name: "synth-seam-fragile",
+  transcribe: (audio) => transcribeWith(audio, false, "synth-seam-fragile", 0.92, 150),
 };
 
-// Fallback: Whisper-class robust decoder (smoothed estimator, same buffer).
-export const WhisperFallback: ASRProvider = {
-  name: "whisper-robust",
-  transcribe: (audio) => transcribeWith(audio, true, "whisper-robust", 0.88, 250),
+// TEST SEAM ONLY: smoothed estimator on the same bytes — cascade recovery side.
+export const SynthSeamFallback: ASRProvider = {
+  name: "synth-seam-smoothed",
+  transcribe: (audio) => transcribeWith(audio, true, "synth-seam-smoothed", 0.88, 250),
 };

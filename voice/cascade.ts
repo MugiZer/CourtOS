@@ -4,7 +4,7 @@
 // never guess between two legal candidates. CourtGuard owns state; this module
 // only proposes typed intents (ADR-001).
 import type { CanonicalScore, MatchState, TeamId, TennisIntent } from "../shared/types.ts";
-import { WhisperFallback, WebSpeechPrimary, parseUtterance, segments, type ASRProvider, type ASRResult } from "./providers.ts";
+import { createBrowserSpeechPrimary, parseUtterance, segments, type ASRProvider, type ASRResult } from "./providers.ts";
 
 // Fixed gates — not tuned per provider (ticket constraint).
 export const STRONG = 0.75; // clear primary + legal + clear margin -> CourtGuard
@@ -101,8 +101,13 @@ export async function interpretScoreCall(args: {
   fallback?: ASRProvider;
 }): Promise<VoiceInterpretation> {
   const { matchState, rules, legalNextStates, pending } = args;
-  const primary = args.primary ?? WebSpeechPrimary;
-  const fallback = args.fallback ?? WhisperFallback;
+  // Production wiring: live browser primary by default; the server-side
+  // fallback is never default-faked — outside a browser (or without an
+  // injected fallback) this throws instead of pretending to hear.
+  const primary = args.primary ?? createBrowserSpeechPrimary();
+  const fallback = args.fallback;
+  if (!primary || !fallback)
+    throw new Error("interpretScoreCall: inject ASR providers explicitly outside the browser (no live-mic, no faked fallback here)");
   const blank: VoiceTrace = { primaryTranscript: "", primaryConfidence: 0, primaryLegal: false, marginClear: true, fallbackInvoked: false, finalIntent: null, outcome: "REJECT", recovery: false };
   const reject = (reason: string, trace: Partial<VoiceTrace> = {}): VoiceInterpretation =>
     ({ outcome: "REJECT", intent: null, reason, trace: { ...blank, ...trace, outcome: "REJECT", reason } });

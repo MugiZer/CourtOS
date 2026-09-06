@@ -120,6 +120,14 @@ export function resolveDispute(
   if (!same.length) throw new Error("resolveDispute: no history");
   const frozen = same.reduce((a, b) => (b.sequence > a.sequence ? b : a)).resultingState;
   if (frozen.phase !== "DISPUTE") throw new Error("resolveDispute: match is not frozen");
+  // The organizer answers "what score do we return to?" (§10) — the target
+  // must be a score already on record, never an unchecked free input.
+  const seen = same.some(
+    (e) =>
+      e.resultingState.serverPoints === args.to.serverPoints &&
+      e.resultingState.receiverPoints === args.to.receiverPoints,
+  );
+  if (!seen) throw new Error("resolveDispute: target score not in match history");
   const intent: TennisIntent = { type: "SCORE_ROLLBACK", to: args.to };
   const r = args.transition(frozen, intent, args.rules);
   const reason = outReason(r);

@@ -10,6 +10,7 @@ import type {
   TeamId,
   TennisIntent,
 } from "../shared/types.ts";
+import { compileRuleset } from "./rules/compiler.ts";
 
 export type GuardResult =
   | { accepted: true; state: MatchState }
@@ -23,15 +24,6 @@ export interface LegalTransition {
 // B03 passes a CompiledRuleset; tests/fixtures pass a definition or nothing.
 export type RulesInput = CompiledRuleset | RulesetDefinition | undefined;
 
-interface GuardCfg {
-  scoring: "ADVANTAGE" | "NO_AD";
-  gamesToWin: number;
-  winByGames: number;
-  tiebreakAt: [number, number] | null;
-  tiebreakPoints: number;
-  tiebreakMargin: number;
-}
-
 const STANDARD_SINGLES: RulesetDefinition = {
   id: "standard-singles",
   version: 1,
@@ -44,25 +36,21 @@ const STANDARD_SINGLES: RulesetDefinition = {
   },
   decidingSet: { kind: "NORMAL_SET" },
 };
+const STANDARD_POLICY: CompiledRuleset = compileRuleset(STANDARD_SINGLES);
 
 const idx = (t: TeamId): number => (t === "A" ? 0 : 1);
 const other = (t: TeamId): TeamId => (t === "A" ? "B" : "A");
 
-function cfgOf(rules: RulesInput): GuardCfg {
-  const d: RulesetDefinition =
-    rules === undefined
-      ? STANDARD_SINGLES
-      : ((rules as { definition?: RulesetDefinition }).definition ??
-        (rules as RulesetDefinition));
-  const tb = d.set?.tiebreak;
-  return {
-    scoring: d.game?.scoring ?? "ADVANTAGE",
-    gamesToWin: d.set?.gamesToWin ?? 6,
-    winByGames: d.set?.winByGames ?? 2,
-    tiebreakAt: tb ? tb.atGames : null,
-    tiebreakPoints: tb?.pointsToWin ?? 7,
-    tiebreakMargin: tb?.winByPoints ?? 2,
-  };
+// One scoring authority (arch §26 rule 3): every game/set/tiebreak/match
+// verdict below comes from the compiled policy. Guard only books state
+// (points/games/sets/service/phase) around those verdicts.
+function policyOf(rules: RulesInput): CompiledRuleset {
+  if (rules === undefined) return STANDARD_POLICY;
+  if (typeof (rules as CompiledRuleset).gameWinner === "function")
+    return rules as CompiledRuleset; // full policy honored, incl. decidingSet
+  const def = (rules as { definition?: RulesetDefinition }).definition ??
+    (rules as RulesetDefinition);
+  return compileRuleset(def);
 }
 
 // Singles alternation: the other player serves next, receives accordingly.
@@ -79,28 +67,18 @@ function flipService(s: MatchState): MatchState["service"] {
   };
 }
 
-function setWon(games: readonly number[], cfg: GuardCfg): boolean {
-  return (
-    Math.max(games[0], games[1]) >= cfg.gamesToWin &&
-    Math.abs(games[0] - games[1]) >= cfg.winByGames
-  );
-}
-
-// Standard singles: best-of-3, first to 2 completed sets.
-function matchWon(sets: Array<[number, number]>, winner: TeamId): boolean {
-  return sets.filter((g) => (g[0] > g[1] ? "A" : "B") === winner).length >= 2;
-}
-
-function winGame(s: MatchState, winner: TeamId, cfg: GuardCfg): MatchState {
+function winGame(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
   const games = [s.games[0], s.games[1]] as [number, number];
   games[idx(winner)] += 1;
-  if (cfg.tiebreakAt !== null && games[0] === cfg.tiebreakAt[0] && games[1] === cfg.tiebreakAt[1]) {
+  const probe = { ...s, games };
+  if (policy.shouldStartTiebreak(probe)) {
     const base = { ...s, serverPoints: 0, receiverPoints: 0, games, inTiebreak: true };
     return { ...base, service: flipService(base) };
   }
-  if (setWon(games, cfg)) {
+  if (policy.setWinner(probe) !== null) {
+    const sets = [...s.sets, games];
     // Match-winning game keeps the final set in `games` (see match-complete fixture).
-    if (matchWon([...s.sets, games], winner)) {
+    if (policy.nextPhase({ ...s, sets }) === "COMPLETE") {
       return { ...s, serverPoints: 0, receiverPoints: 0, games, phase: "COMPLETE", winner };
     }
     const base = {
@@ -108,53 +86,60 @@ function winGame(s: MatchState, winner: TeamId, cfg: GuardCfg): MatchState {
       serverPoints: 0,
       receiverPoints: 0,
       games: [0, 0] as [number, number],
-      sets: [...s.sets, games],
+      sets,
     };
+    // Split sets under a MATCH_TIEBREAK decider start the match tiebreak as a
+    // distinct phase — never a third set.
+    if (policy.shouldStartMatchTiebreak(base)) {
+      const mtb = { ...base, inTiebreak: true };
+      return { ...mtb, service: flipService(mtb) };
+    }
     return { ...base, service: flipService(base) };
   }
   const base = { ...s, serverPoints: 0, receiverPoints: 0, games };
   return { ...base, service: flipService(base) };
 }
 
-function winTiebreak(s: MatchState, winner: TeamId): MatchState {
-  const decided: [number, number] = winner === "A" ? [7, 6] : [6, 7];
-  const sets = [...s.sets, decided];
-  if (matchWon(sets, winner)) {
-    return {
-      ...s, serverPoints: 0, receiverPoints: 0,
-      games: [0, 0] as [number, number], sets, inTiebreak: false, phase: "COMPLETE", winner,
-    };
+function winTiebreak(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
+  // Decided match tiebreak ends the match in place: distinct phase, no third set.
+  if (policy.nextPhase(s) === "COMPLETE") {
+    return { ...s, phase: "COMPLETE", winner };
   }
+  // Set-tiebreak win is recorded as one extra game (compiler convention).
+  const decided = [s.games[0], s.games[1]] as [number, number];
+  decided[idx(winner)] += 1;
+  const sets = [...s.sets, decided];
   const base = {
     ...s, serverPoints: 0, receiverPoints: 0,
     games: [0, 0] as [number, number], sets, inTiebreak: false,
   };
+  if (policy.nextPhase(base) === "COMPLETE") {
+    return { ...base, phase: "COMPLETE", winner };
+  }
   return { ...base, service: flipService(base) };
 }
 
-function applyPoint(s: MatchState, winner: TeamId, cfg: GuardCfg): MatchState {
+function applyPoint(s: MatchState, winner: TeamId, policy: CompiledRuleset): MatchState {
   const serverWon = winner === s.service.servingTeam;
   const serverPoints = s.serverPoints + (serverWon ? 1 : 0);
   const receiverPoints = s.receiverPoints + (serverWon ? 0 : 1);
   const next = { ...s, serverPoints, receiverPoints };
-  const w = serverWon ? serverPoints : receiverPoints;
-  const l = serverWon ? receiverPoints : serverPoints;
   if (s.inTiebreak) {
-    if (w >= cfg.tiebreakPoints && w - l >= cfg.tiebreakMargin) return winTiebreak(next, winner);
+    if (policy.tiebreakWinner(next) !== null) return winTiebreak(next, winner, policy);
     return next;
   }
-  if (w >= 4 && (cfg.scoring === "NO_AD" || w - l >= 2)) return winGame(next, winner, cfg);
+  if (policy.gameWinner(next) !== null) return winGame(next, winner, policy);
   return next;
 }
 
 // First-class API: every legal point outcome from here (powers transition,
 // voice ranking, tactile controls). Empty when no point can be played.
 export function legalNextStates(state: MatchState, rules?: RulesInput): LegalTransition[] {
-  if (state.phase === "DISPUTE" || state.phase === "COMPLETE") return [];
-  const cfg = cfgOf(rules);
+  const policy = policyOf(rules);
+  if (policy.legalEvents(state).length === 0) return [];
   return (["A", "B"] as TeamId[]).map((winner) => ({
     intent: { type: "POINT_WON", winner },
-    nextState: applyPoint(state, winner, cfg),
+    nextState: applyPoint(state, winner, policy),
   }));
 }
 
@@ -173,7 +158,7 @@ export function transition(state: MatchState, intent: TennisIntent, rules?: Rule
   switch (intent.type) {
     case "POINT_WON": {
       if (intent.winner !== "A" && intent.winner !== "B") return reject(state, "INVALID_INTENT");
-      return { accepted: true, state: applyPoint(state, intent.winner, cfgOf(rules)) };
+      return { accepted: true, state: applyPoint(state, intent.winner, policyOf(rules)) };
     }
     case "SCORE_CALL": {
       const p = intent.score;
@@ -188,7 +173,11 @@ export function transition(state: MatchState, intent: TennisIntent, rules?: Rule
           t.nextState.serverPoints === p.serverPoints &&
           t.nextState.receiverPoints === p.receiverPoints,
       );
-      if (hits.length === 1) return { accepted: true, state: hits[0].nextState };
+      // B02 spec: a score call resolves to exactly one POINT_WON — commit it
+      // through the same path, never the previewed state directly.
+      if (hits.length === 1 && hits[0].intent.type === "POINT_WON") {
+        return transition(state, { type: "POINT_WON", winner: hits[0].intent.winner }, rules);
+      }
       if (hits.length > 1) return reject(state, "AMBIGUOUS_SCORE");
       return reject(state, "ILLEGAL_TRANSITION");
     }

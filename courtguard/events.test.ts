@@ -115,8 +115,35 @@ describe("B05 events + replay + dispute", () => {
     assert.throws(() => replay(bad, stubTransition, RULES), /diverged/);
   });
 
-  it("guards: empty replay, resolve-when-not-frozen, reasonless rejection, chain break", () => {
-    assert.throws(() => replay([]), /empty/);
+  it("resolveDispute rejects a target score never recorded in history", () => {
+    const log: MatchEventRecord[] = [];
+    drive(log, { type: "POINT_WON", winner: "A" }); // -> 40-15 (3,1)
+    drive(log, { type: "POINT_WON", winner: "B" }); // -> 40-30 (3,2)
+    drive(log, { type: "DISPUTE_START", reason: "contested" });
+    const lenBefore = log.length;
+    assert.throws(
+      () => resolveDispute(log, {
+        matchId: "m1",
+        to: { serverPoints: 9, receiverPoints: 9 }, // never a resultingState
+        transition: stubTransition,
+        rules: RULES,
+      }),
+      /not in match history/,
+    );
+    assert.equal(log.length, lenBefore, "rejected target never enters the log");
+    // A recorded resultingState still resolves.
+    const fix = resolveDispute(log, {
+      matchId: "m1",
+      to: { serverPoints: 3, receiverPoints: 1 },
+      transition: stubTransition,
+      rules: RULES,
+      timestamp: (ts += 1000),
+    });
+    assert.equal(fix.decision, "ACCEPTED");
+    assert.deepEqual([fix.resultingState.serverPoints, fix.resultingState.receiverPoints], [3, 1]);
+  });
+
+  it("guards: empty replay, resolve-when-not-frozen, reasonless rejection, chain break", () => {    assert.throws(() => replay([]), /empty/);
     const log: MatchEventRecord[] = [];
     drive(log, { type: "POINT_WON", winner: "A" });
     assert.throws(() => resolveDispute(log, { matchId: "m1", to: { serverPoints: 0, receiverPoints: 0 }, transition: stubTransition, rules: RULES }), /not frozen/);

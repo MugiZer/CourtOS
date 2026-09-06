@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { legalNextStates, transition } from "./guard.ts";
-import type { MatchState, RulesetDefinition, TeamId } from "../shared/types.ts";
+import { compileRuleset } from "./rules/compiler.ts";
+import type { CompiledRuleset, MatchState, RulesetDefinition, TeamId } from "../shared/types.ts";
 
 const singles = (over: Partial<MatchState> = {}): MatchState => ({
   matchId: "m1",
@@ -45,7 +46,7 @@ const TB10 = stdDef({
   set: { gamesToWin: 6, winByGames: 2, tiebreak: { atGames: [6, 6], pointsToWin: 10, winByPoints: 2 } },
 });
 
-const point = (s: MatchState, w: TeamId, rules?: RulesetDefinition) =>
+const point = (s: MatchState, w: TeamId, rules?: RulesetDefinition | CompiledRuleset) =>
   transition(s, { type: "POINT_WON", winner: w }, rules);
 
 describe("voice table: 30-15 hears a resulting score", () => {
@@ -328,5 +329,85 @@ describe("B01 fixture replay", () => {
     const r = transition(f.finalRecord.previousState, f.finalRecord.proposedIntent);
     assert.equal(r.accepted, true);
     if (r.accepted) assert.deepEqual(r.state, f.finalRecord.resultingState);
+  });
+});
+
+describe("SCORE_CALL resolves to POINT_WON (B02 spec)", () => {
+  it("commits through the POINT_WON path: same resulting state as the primitive", () => {
+    const prev = singles();
+    for (const heard of [{ serverPoints: 3, receiverPoints: 1 }, { serverPoints: 2, receiverPoints: 2 }]) {
+      const viaCall = transition(prev, { type: "SCORE_CALL", score: heard });
+      const winner = heard.serverPoints === 3 ? "A" : "B";
+      const viaPoint = transition(prev, { type: "POINT_WON", winner });
+      assert.equal(viaCall.accepted, true);
+      assert.equal(viaPoint.accepted, true);
+      if (viaCall.accepted && viaPoint.accepted) assert.deepEqual(viaCall.state, viaPoint.state);
+    }
+  });
+  it("game-winning call resolves to the game (0-0 from 40-15 takes it for A)", () => {
+    const prev = singles({ serverPoints: 3, receiverPoints: 1 });
+    const viaCall = transition(prev, { type: "SCORE_CALL", score: { serverPoints: 0, receiverPoints: 0 } });
+    const viaPoint = transition(prev, { type: "POINT_WON", winner: "A" });
+    assert.equal(viaCall.accepted, true);
+    if (viaCall.accepted) {
+      assert.deepEqual(viaCall.state.games, [3, 1]);
+      if (viaPoint.accepted) assert.deepEqual(viaCall.state, viaPoint.state);
+    }
+  });
+});
+
+describe("deciding match tiebreak honors the compiled policy (F1/F3)", () => {
+  const MTB = stdDef({
+    set: { gamesToWin: 6, winByGames: 2, tiebreak: { atGames: [6, 6], pointsToWin: 7, winByPoints: 2 } },
+    decidingSet: { kind: "MATCH_TIEBREAK", pointsToWin: 10, winByPoints: 2 },
+  });
+  const COMPILED: CompiledRuleset = compileRuleset(structuredClone(MTB));
+  const SPLIT: Array<[number, number]> = [[6, 4], [4, 6]];
+  const mtb = (sp: number, rp: number): MatchState =>
+    singles({ games: [0, 0], sets: structuredClone(SPLIT), inTiebreak: true, serverPoints: sp, receiverPoints: rp });
+  // 10-pt MTB table (arch §7): 10-8 over, 10-9 not, 11-9/12-10 over.
+  const rows: Array<[string, number, number, TeamId, boolean]> = [
+    ["10-8 over", 9, 8, "A", true],
+    ["10-9 not over", 9, 9, "A", false],
+    ["11-9 over", 10, 9, "A", true],
+    ["12-10 over", 11, 10, "A", true],
+    ["8-10 over for B", 8, 9, "B", true],
+  ];
+  for (const [name, sp, rp, w, over] of rows) {
+    it(`MTB ${name}`, () => {
+      const kinds = [["definition", MTB], ["compiled", COMPILED]] as const;
+      for (const [kind, rules] of kinds) {
+        const r = point(mtb(sp, rp), w, rules);
+        assert.equal(r.accepted, true, `${name} (${kind})`);
+        if (!r.accepted) return;
+        assert.equal(r.state.phase, over ? "COMPLETE" : "PLAYING", `${name} (${kind})`);
+        if (over) {
+          assert.equal(r.state.winner, w);
+          assert.deepEqual(r.state.sets, SPLIT); // distinct phase: no third set recorded
+        } else {
+          assert.equal(r.state.inTiebreak, true);
+        }
+      }
+    });
+  }
+  it("compiled ruleset and definition inputs agree (decidingSet honored)", () => {
+    const s = mtb(9, 9);
+    const a = point(s, "A", MTB);
+    const b = point(structuredClone(s), "A", COMPILED);
+    assert.equal(a.accepted, true);
+    assert.equal(b.accepted, true);
+    if (a.accepted && b.accepted) assert.deepEqual(a.state, b.state);
+  });
+  it("second set won at 1-1 starts the deciding MTB, not a third set", () => {
+    const prev = singles({
+      games: [5, 3], sets: [[4, 6]], serverPoints: 3, receiverPoints: 1,
+    });
+    const r = point(prev, "A", MTB);
+    assert.equal(r.accepted, true);
+    if (!r.accepted) return;
+    assert.equal(r.state.phase, "PLAYING");
+    assert.equal(r.state.inTiebreak, true);
+    assert.deepEqual(r.state.sets, [[4, 6], [6, 3]]);
+    assert.deepEqual(r.state.games, [0, 0]);
   });
 });

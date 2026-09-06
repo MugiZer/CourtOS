@@ -1,8 +1,10 @@
-// B08 proof: all four voice paths through the REAL provider code path —
-// canned PCM bytes in, no ASR mocks. Live-mic proof is demo-day.
+// B08 proof: all four voice paths through the cascade RANKING/FUSION logic,
+// driven by the synth TEST SEAM (canned PCM bytes in — deterministic estimator
+// stand-ins, explicitly not real providers). Our logic under test is ranking,
+// gating, and fusion; live-mic proof against the real browser ASR is demo-day.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { encodeUtterance } from "./providers.ts";
+import { encodeUtterance, SynthSeamFallback, SynthSeamPrimary, createBrowserSpeechPrimary, createWhisperFallback } from "./providers.ts";
 import { interpretScoreCall, tactileIntent, type LegalFn } from "./cascade.ts";
 
 // mid-game 30-15 (mirrors shared/fixtures/mid-game-30-15.json).
@@ -21,10 +23,18 @@ const legalNextStates: LegalFn = () => [
   { intent: { type: "LET" } },
 ];
 const run = (audio: Uint8Array, extra: any = {}) =>
-  interpretScoreCall({ audio, matchState: state30_15, legalNextStates, ...extra });
+  interpretScoreCall({
+    audio,
+    matchState: state30_15,
+    legalNextStates,
+    // Synth seam stand-ins: exercise ranking/fusion only, not real ASR.
+    primary: SynthSeamPrimary,
+    fallback: SynthSeamFallback,
+    ...extra,
+  });
 
-describe("B08 voice cascade", () => {
-  it("golden: clear primary goes straight to CourtGuard intent, no fallback", async () => {
+describe("B08 voice cascade (synth seam: ranking/fusion logic only)", () => {
+  it("golden: clear seam-primary output goes straight to CourtGuard intent, no fallback", async () => {
     const r = await run(encodeUtterance(["forty", "fifteen"]));
     assert.equal(r.outcome, "ACCEPT");
     assert.deepEqual((r.intent as any).score, { serverPoints: 3, receiverPoints: 1 });
@@ -33,7 +43,7 @@ describe("B08 voice cascade", () => {
     assert.equal(r.trace.recovery, false);
   });
 
-  it("cascade-recovery: illegal primary, fallback recovers same audio", async () => {
+  it("cascade-recovery: illegal seam-primary output, seam fallback recovers same audio", async () => {
     const r = await run(encodeUtterance(["forty", "fifteen"], { noiseAmp: 800 }));
     assert.equal(r.trace.primaryTranscript, "forty thirty"); // illegal from 30-15
     assert.equal(r.trace.primaryLegal, false);
@@ -63,5 +73,17 @@ describe("B08 voice cascade", () => {
     assert.equal(r.reason, "VOICE_UNCLEAR");
     assert.equal(r.trace.fallbackInvoked, true);
     assert.deepEqual(tactileIntent("A"), { type: "POINT_WON", winner: "A" });
+  });
+
+  it("provider honesty: no browser live-mic here, no keyless server fallback", async () => {
+    // Cannot even be constructed without a browser — said plainly (null).
+    assert.equal(createBrowserSpeechPrimary(), null);
+    // Server-side fallback needs a key; it is never faked.
+    assert.throws(() => createWhisperFallback({ apiKey: "" }), /needs an API key/);
+    // And the cascade refuses to run without injected providers in Node.
+    await assert.rejects(
+      interpretScoreCall({ audio: encodeUtterance(["forty", "fifteen"]), matchState: state30_15, legalNextStates }),
+      /inject ASR providers/,
+    );
   });
 });
