@@ -1130,6 +1130,17 @@ Avoid decorative motion that hurts outdoor legibility.
 
 ---
 
+### Demo 3D choreography
+
+The hackathon demo includes a deterministic 3D two-court presentation layer. It is demo infrastructure, not production authority.
+
+- Court 1 plays a predetermined rally, resets, and waits for the existing voice/touch path to produce an accepted CourtGuard score before another rally is eligible to begin. Rejection or unresolved correction keeps the next rally paused.
+- Court 2 is a scripted simulated court using the normal CourtGuard/event path; animation completion alone never commits a point.
+- Score, service positions, dispute/frozen, changeover, match-complete, and assignment visuals react to authoritative match/lifecycle events. A scripted visual point outcome is choreography, not evidence authorizing a score.
+- Rally, reset, handshake, and warmup clips use predetermined animations rather than tennis physics or procedural gameplay. Court 1's clips and progression run locally without depending on organizer acknowledgments.
+
+---
+
 ## 18. Sponsor media / changeover flow
 
 Do not build a sponsor CMS or marketplace.
@@ -1487,6 +1498,14 @@ Use this section for future decisions. Replace obsolete decisions explicitly rat
 **Decision:** sponsor content is automatically attached to `CHANGEOVER` state.
 
 **Reason:** monetization is part of real match operations rather than a disconnected ad feature.
+
+---
+
+### ADR-013 — Demo 3D choreography
+
+**Decision:** Deterministic 3D demo choreography is downstream of authoritative state.
+
+**Reason:** scripted two-court visuals make the existing demo legible while CourtGuard and the tournament engine retain all scoring and assignment authority.
 
 ---
 

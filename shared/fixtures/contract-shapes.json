@@ -1,0 +1,77 @@
+{
+  "ruleset": {
+    "id": "standard-singles",
+    "version": 1,
+    "participants": { "mode": "SINGLES" },
+    "game": { "scoring": "ADVANTAGE" },
+    "set": {
+      "gamesToWin": 6,
+      "winByGames": 2,
+      "tiebreak": { "atGames": [6, 6], "pointsToWin": 7, "winByPoints": 2 }
+    },
+    "decidingSet": { "kind": "NORMAL_SET" }
+  },
+  "twin": {
+    "version": 18,
+    "courts": {
+      "c1": { "courtId": "c1", "status": "PLAYING", "currentMatchId": "m1" }
+    },
+    "matches": {
+      "m1": {
+        "matchId": "m1",
+        "courtId": "c1",
+        "rulesetId": "standard-singles",
+        "rulesetVersion": 1,
+        "phase": "PLAYING",
+        "serverPoints": 2,
+        "receiverPoints": 1,
+        "games": [2, 1],
+        "sets": [],
+        "inTiebreak": false,
+        "service": {
+          "servingTeam": "A",
+          "server": "p1",
+          "receivingTeam": "B",
+          "deuceReceiver": "p2",
+          "adReceiver": "p2",
+          "serviceOrder": ["p1", "p2"]
+        },
+        "winner": null
+      }
+    },
+    "players": {
+      "p1": { "playerId": "p1", "available": false },
+      "p2": { "playerId": "p2", "available": false }
+    },
+    "assignments": {
+      "c1": { "matchId": "m1", "courtId": "c1", "status": "PLAYING" }
+    },
+    "rulesets": {
+      "standard-singles": {
+        "id": "standard-singles",
+        "version": 1,
+        "participants": { "mode": "SINGLES" },
+        "game": { "scoring": "ADVANTAGE" },
+        "set": {
+          "gamesToWin": 6,
+          "winByGames": 2,
+          "tiebreak": { "atGames": [6, 6], "pointsToWin": 7, "winByPoints": 2 }
+        },
+        "decidingSet": { "kind": "NORMAL_SET" }
+      }
+    },
+    "connectivity": { "c1": "ONLINE" },
+    "sponsor": { "creativeId": "sponsor-demo-01" }
+  },
+  "intents": [
+    { "type": "SCORE_CALL", "score": { "serverPoints": 3, "receiverPoints": 0 }, "transcript": "forty love" },
+    { "type": "POINT_WON", "winner": "A" },
+    { "type": "FAULT" },
+    { "type": "LET" },
+    { "type": "CORRECTION" },
+    { "type": "CONFIRM_YES" },
+    { "type": "CONFIRM_NO" },
+    { "type": "DISPUTE_START", "reason": "players contest the last call" },
+    { "type": "SCORE_ROLLBACK", "to": { "serverPoints": 2, "receiverPoints": 1 } }
+  ]
+}

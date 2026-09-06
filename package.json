@@ -1,0 +1,24 @@
+{
+  "name": "courtos",
+  "version": "1.0.0",
+  "description": "CourtOS is a starting point for a court-focused application.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MugiZer/CourtOS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MugiZer/CourtOS/issues"
+  },
+  "homepage": "https://github.com/MugiZer/CourtOS#readme",
+  "dependencies": {
+    "socket.io": "4.8.1",
+    "socket.io-client": "4.8.1"
+  }
+}

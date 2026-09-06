@@ -1,0 +1,23 @@
+{
+  "state": {
+    "matchId": "m1",
+    "courtId": "c1",
+    "rulesetId": "standard-singles",
+    "rulesetVersion": 1,
+    "phase": "PLAYING",
+    "serverPoints": 2,
+    "receiverPoints": 1,
+    "games": [2, 1],
+    "sets": [],
+    "inTiebreak": false,
+    "service": {
+      "servingTeam": "A",
+      "server": "p1",
+      "receivingTeam": "B",
+      "deuceReceiver": "p2",
+      "adReceiver": "p2",
+      "serviceOrder": ["p1", "p2"]
+    },
+    "winner": null
+  }
+}

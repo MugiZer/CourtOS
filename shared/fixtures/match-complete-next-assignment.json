@@ -1,0 +1,84 @@
+{
+  "state": {
+    "matchId": "m1",
+    "courtId": "c1",
+    "rulesetId": "standard-singles",
+    "rulesetVersion": 1,
+    "phase": "COMPLETE",
+    "serverPoints": 0,
+    "receiverPoints": 0,
+    "games": [6, 3],
+    "sets": [[6, 4]],
+    "inTiebreak": false,
+    "service": {
+      "servingTeam": "A",
+      "server": "p1",
+      "receivingTeam": "B",
+      "deuceReceiver": "p2",
+      "adReceiver": "p2",
+      "serviceOrder": ["p1", "p2"]
+    },
+    "winner": "A"
+  },
+  "finalRecord": {
+    "id": "evt-complete-042",
+    "courtId": "c1",
+    "matchId": "m1",
+    "sequence": 42,
+    "timestamp": 1725464000000,
+    "source": "VOICE",
+    "transcript": "game set match",
+    "proposedIntent": { "type": "POINT_WON", "winner": "A" },
+    "previousState": {
+      "matchId": "m1",
+      "courtId": "c1",
+      "rulesetId": "standard-singles",
+      "rulesetVersion": 1,
+      "phase": "PLAYING",
+      "serverPoints": 3,
+      "receiverPoints": 1,
+      "games": [5, 3],
+      "sets": [[6, 4]],
+      "inTiebreak": false,
+      "service": {
+        "servingTeam": "A",
+        "server": "p1",
+        "receivingTeam": "B",
+        "deuceReceiver": "p2",
+        "adReceiver": "p2",
+        "serviceOrder": ["p1", "p2"]
+      },
+      "winner": null
+    },
+    "decision": "ACCEPTED",
+    "resultingState": {
+      "matchId": "m1",
+      "courtId": "c1",
+      "rulesetId": "standard-singles",
+      "rulesetVersion": 1,
+      "phase": "COMPLETE",
+      "serverPoints": 0,
+      "receiverPoints": 0,
+      "games": [6, 3],
+      "sets": [[6, 4]],
+      "inTiebreak": false,
+      "service": {
+        "servingTeam": "A",
+        "server": "p1",
+        "receivingTeam": "B",
+        "deuceReceiver": "p2",
+        "adReceiver": "p2",
+        "serviceOrder": ["p1", "p2"]
+      },
+      "winner": "A"
+    }
+  },
+  "plan": {
+    "basedOnStateVersion": 18,
+    "assignments": [
+      { "matchId": "m3", "courtId": "c1", "status": "ANNOUNCED" }
+    ],
+    "projectedFinishTime": 1725471000000,
+    "objectiveBreakdown": { "makespan": 1, "wait": 0, "idle": 0, "churn": 1 }
+  }
+}

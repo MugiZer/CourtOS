@@ -1,5 +1,6 @@
 Type: task
-Status: open
+Status: superseded
+Superseded-by: .scratch/backend/ (to-tickets re-slice: B05)
 Blocked by: 03
 
 ## Question
